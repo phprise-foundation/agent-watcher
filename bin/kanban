@@ -1,0 +1,8 @@
+#!/bin/sh
+# Helper de quadro (kanban) usado tanto pelo loop quanto pelos agentes opencode.
+if [ -d /app/src ]; then
+    exec python3 /app/src/kanban.py "$@"
+else
+    DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    exec python3 "$DIR/src/kanban.py" "$@"
+fi

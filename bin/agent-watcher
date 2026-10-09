@@ -1,0 +1,8 @@
+#!/bin/sh
+# Entrypoint do agent-watcher (dentro do container aponta para /app/src).
+if [ -d /app/src ]; then
+    exec python3 /app/src/cli.py "$@"
+else
+    DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    exec python3 "$DIR/src/cli.py" "$@"
+fi
