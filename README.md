@@ -41,6 +41,7 @@ docker run -d \
 | `--name` | sim | identidade do agente (assina comentários e o campo `Worker`) |
 | `--rule` | sim | regra (predefinida ou caminho). Repetível. |
 | `--model` | sim | modelo no formato `provider/model` |
+| `--fallback-model` | não | modelo alternativo usado **apenas na iteração atual** quando o principal retorna rate limit/quota (429). Sem fallback, o agente volta a dormir e reprocessa na próxima janela |
 | `--repo` | sim | repositório `owner/repo` |
 | `--project` | sim | número do Project V2 |
 | `--workdir` | sim | diretório de trabalho (montado) |
@@ -105,6 +106,7 @@ O Project V2 deve ter estes campos:
 
 - `Status` (single-select): `to-do → qa-refinement → coding → reviewing → testing → done` (fluxo linear; itens **não voltam** — correção vira nova issue).
 - `Blocked` (single-select, opção `blocked`): flag booleana independente do status.
+- `BlockedBy` (texto): quando bloqueado, indica qual tarefa/issue está bloqueando (ex.: `RFC-2`). Usado pelo Tech Lead para decidir o desbloqueio.
 - `Role` (single-select): `product-owner | tech-lead | qa | coder`.
 - `Worker` (single-select): nome do agente em execução.
 

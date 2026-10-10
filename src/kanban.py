@@ -141,6 +141,7 @@ def items():
             "title": content.get("title"),
             "status": it.get("status") or "",
             "blocked": bool(it.get("blocked")),
+            "blocked_by": it.get("blockedBy") or it.get("BlockedBy") or it.get("blocked_by") or "",
             "role": it.get("role") or "",
             "worker": it.get("worker") or "",
         })
@@ -175,8 +176,9 @@ def cmd_list(args):
         return
     for r in rows:
         flag = "BLK" if r["blocked"] else "   "
+        blkby = f" <- {r['blocked_by']}" if r.get("blocked_by") else ""
         print(f"#{r['number']}\t{r['status'] or '-'}\t{r['role'] or '-'}\t"
-              f"{r['worker'] or '-'}\t{flag}\t{r['title']}")
+              f"{r['worker'] or '-'}\t{flag}\t{r['title']}{blkby}")
 
 
 def cmd_next(args):
@@ -235,6 +237,10 @@ def cmd_set(args):
         set_field(args.number, "Blocked", BLOCKED_OPTION)
     if args.unblocked:
         clear_field(args.number, "Blocked")
+    if args.blocked_by:
+        set_field(args.number, "BlockedBy", args.blocked_by)
+    if args.clear_blocked_by:
+        clear_field(args.number, "BlockedBy")
 
 
 def cmd_clear(args):
@@ -264,6 +270,9 @@ def cmd_create(args):
     gh(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
     set_field(number, "Status", args.status or "to-do")
     set_field(number, "Role", args.role)
+    if args.blocked_by:
+        set_field(number, "Blocked", BLOCKED_OPTION)
+        set_field(number, "BlockedBy", args.blocked_by)
     print(number)
 
 
@@ -298,6 +307,8 @@ def main():
     p.add_argument("--clear-worker", action="store_true")
     p.add_argument("--blocked", action="store_true")
     p.add_argument("--unblocked", action="store_true")
+    p.add_argument("--blocked-by")
+    p.add_argument("--clear-blocked-by", action="store_true")
     p.set_defaults(func=cmd_set)
 
     p = sub.add_parser("comment")
@@ -316,6 +327,7 @@ def main():
     p.add_argument("--body-file")
     p.add_argument("--status")
     p.add_argument("--role")
+    p.add_argument("--blocked-by")
     p.set_defaults(func=cmd_create)
 
     args = ap.parse_args()

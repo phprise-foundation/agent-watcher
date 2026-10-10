@@ -2,12 +2,23 @@
 import datetime
 import subprocess
 import sys
+import tempfile
 import time
 
 import kanban
 import rules
 
 STATUSES_HELP = "to-do, qa-refinement, coding, reviewing, testing, done"
+
+LLM_RATE_LIMIT_MARKERS = (
+    "rate limit", "rate_limit", "429", "insufficient_quota", "insufficient quota",
+    "quota", "billing", "too many requests", "overloaded",
+)
+
+
+def _llm_rate_limited(text):
+    low = (text or "").lower()
+    return any(m in low for m in LLM_RATE_LIMIT_MARKERS)
 
 
 def log(msg):
@@ -26,10 +37,10 @@ def build_prompt(config, number, title):
 # Interação com o quadro (helper `kanban`)
 
 - Consultar: kanban list [--status <x>] [--blocked] [--json]
-- Mudar estado: kanban set <n> --status <x> [--role <r>] [--worker <w>] [--blocked|--unblocked]
+- Mudar estado: kanban set <n> --status <x> [--role <r>] [--worker <w>] [--blocked|--unblocked] [--blocked-by <tarefa>|--clear-blocked-by]
 - Limpar campo: kanban clear <n> --field Worker
 - Comentar: kanban comment <n> --text "..."
-- Criar issue: kanban create --title "..." --body-file <arquivo.md> [--status <x>] [--role <r>]
+- Criar issue: kanban create --title "..." --body-file <arquivo.md> [--status <x>] [--role <r>] [--blocked-by <tarefa>]
 
 Statuses válidos (fluxo linear, os itens NÃO voltam; correção vira nova issue):
 {STATUSES_HELP}
@@ -43,15 +54,38 @@ Trabalhe na issue #{number} do repositório {config['repo']}.
 """
 
 
-def run_agent(config, number, title):
+def run_agent(config, number, title, model):
     prompt = build_prompt(config, number, title)
-    log(f"invocando opencode para #{number} ({config['model']})")
-    r = subprocess.run(
-        ["opencode", "run", "--auto", "--print-logs", "-m", config["model"],
-         "--dir", config["workdir"], prompt],
-    )
-    if r.returncode != 0:
-        log(f"opencode terminou com código {r.returncode}")
+    log(f"invocando opencode para #{number} ({model})")
+    with tempfile.TemporaryFile() as errf:
+        r = subprocess.run(
+            ["opencode", "run", "--auto", "--print-logs", "-m", model,
+             "--dir", config["workdir"], prompt],
+            stdout=None, stderr=errf,
+        )
+        errf.seek(0)
+        err_text = errf.read().decode("utf-8", "replace")
+    if err_text:
+        sys.stderr.write(err_text)
+    if r.returncode == 0:
+        return "ok"
+    log(f"opencode terminou com código {r.returncode}")
+    if _llm_rate_limited(err_text):
+        return "rate_limited"
+    return "error"
+
+
+def process(config, name, number, title):
+    """Reclama, roda o opencode e libera o Worker. Retorna ok/rate_limited/error."""
+    kanban.set_field(number, "Worker", name)
+    result = run_agent(config, number, title, config["model"])
+    if result == "rate_limited":
+        fallback = config.get("fallback_model")
+        if fallback:
+            log(f"rate limit no modelo principal; tentando fallback {fallback} em #{number}")
+            result = run_agent(config, number, title, fallback)
+    kanban.clear_field(number, "Worker")
+    return result
 
 
 def next_task(rows, statuses):
@@ -97,11 +131,14 @@ def loop(config):
                 blk = next_blocked(rows)
                 if blk:
                     log(f"desbloqueando #{blk['number']} (status={blk['status']})")
-                    kanban.set_field(blk["number"], "Worker", name)
-                    run_agent(config, blk["number"], blk["title"])
-                    kanban.clear_field(blk["number"], "Worker")
-                    backoff = short
-                    time.sleep(short)
+                    result = process(config, name, blk["number"], blk["title"])
+                    if result == "rate_limited":
+                        log(f"rate limit sem fallback. aguardando {backoff}s")
+                        time.sleep(backoff)
+                        backoff = min(backoff * 2, max_backoff)
+                    else:
+                        backoff = short
+                        time.sleep(short)
                     continue
 
             task = next_task(rows, statuses)
@@ -112,11 +149,14 @@ def loop(config):
                 continue
 
             log(f"reclamando #{task['number']} ({task['status']})")
-            kanban.set_field(task["number"], "Worker", name)
-            run_agent(config, task["number"], task["title"])
-            kanban.clear_field(task["number"], "Worker")
-            backoff = short
-            time.sleep(short)
+            result = process(config, name, task["number"], task["title"])
+            if result == "rate_limited":
+                log(f"rate limit sem fallback. aguardando {backoff}s")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
+            else:
+                backoff = short
+                time.sleep(short)
 
         except kanban.RateLimitError as e:
             log(f"rate limit: {e}. aguardando {backoff}s")

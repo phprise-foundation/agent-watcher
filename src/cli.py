@@ -25,6 +25,8 @@ def main(argv=None):
     ap.add_argument("--rule", action="append", required=True,
                     help="regra (predefinida ou caminho). Repetível.")
     ap.add_argument("--model", required=True, help="modelo no formato provider/model")
+    ap.add_argument("--fallback-model", default=None,
+                    help="modelo alternativo (provider/model) usado apenas na iteração atual em caso de rate limit (429/quota)")
     ap.add_argument("--repo", required=True, help="repositório owner/repo")
     ap.add_argument("--project", required=True, help="número do Project V2")
     ap.add_argument("--workdir", required=True, help="diretório de trabalho (montado)")
@@ -58,6 +60,7 @@ def main(argv=None):
     config = {
         "name": args.name,
         "model": args.model,
+        "fallback_model": args.fallback_model,
         "repo": args.repo,
         "project": str(args.project),
         "workdir": args.workdir,
