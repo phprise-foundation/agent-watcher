@@ -21,9 +21,17 @@ import re
 import subprocess
 import sys
 
-OWNER = os.environ.get("AW_OWNER", "")
-PROJECT = os.environ.get("AW_PROJECT", "")
-REPO = os.environ.get("AW_REPO", "")
+def owner():
+    return os.environ.get("AW_OWNER", "")
+
+
+def project():
+    return os.environ.get("AW_PROJECT", "")
+
+
+def repo():
+    return os.environ.get("AW_REPO", "")
+
 
 STATUSES = ["to-do", "qa-refinement", "coding", "reviewing", "testing", "done"]
 ACTIVE = ["qa-refinement", "coding", "reviewing", "testing"]
@@ -40,13 +48,13 @@ def fail(msg):
 
 
 def require_config():
-    if not OWNER or not PROJECT or not REPO:
+    if not owner() or not project() or not repo():
         fail("config ausente: defina AW_OWNER, AW_REPO e AW_PROJECT")
 
 
 def items():
     require_config()
-    r = run(["gh", "project", "item-list", str(PROJECT), "--owner", OWNER,
+    r = run(["gh", "project", "item-list", str(project()), "--owner", owner(),
              "--format", "json", "--limit", "200"])
     if r.returncode != 0:
         fail(r.stderr.strip())
@@ -77,7 +85,7 @@ def sort_key(it):
 def issue_url(number):
     if str(number).startswith("http"):
         return number
-    return f"https://github.com/{REPO}/issues/{number}"
+    return f"https://github.com/{repo()}/issues/{number}"
 
 
 def cmd_list(args):
@@ -130,7 +138,7 @@ def set_field(number, field, value):
     if not value:
         return
     url = issue_url(number)
-    r = run(["gh", "project", "item-edit", str(PROJECT), "--owner", OWNER,
+    r = run(["gh", "project", "item-edit", str(project()), "--owner", owner(),
              "--url", url, "--field", field, "--value", value])
     if r.returncode != 0:
         fail(r.stderr.strip())
@@ -138,7 +146,7 @@ def set_field(number, field, value):
 
 def clear_field(number, field):
     url = issue_url(number)
-    r = run(["gh", "project", "item-edit", str(PROJECT), "--owner", OWNER,
+    r = run(["gh", "project", "item-edit", str(project()), "--owner", owner(),
              "--url", url, "--field", field, "--clear"])
     if r.returncode != 0:
         fail(r.stderr.strip())
@@ -180,14 +188,14 @@ def cmd_create(args):
     if args.body_file:
         with open(args.body_file) as f:
             body = f.read()
-    r = run(["gh", "api", f"repos/{REPO}/issues",
+    r = run(["gh", "api", f"repos/{repo()}/issues",
              "-f", f"title={args.title}", "-f", f"body={body}"])
     if r.returncode != 0:
         fail(r.stderr.strip())
     data = json.loads(r.stdout)
     number = data["number"]
     url = data["html_url"]
-    r2 = run(["gh", "project", "item-add", str(PROJECT), "--owner", OWNER, "--url", url])
+    r2 = run(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
     if r2.returncode != 0:
         fail(r2.stderr.strip())
     set_field(number, "Status", args.status or "to-do")
