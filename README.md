@@ -46,11 +46,26 @@ docker run -d \
 | `--workdir` | sim | diretório de trabalho (montado) |
 | `--env` | não | `KEY=VALUE` exportada para o processo. Repetível (alternativa a `-e`) |
 | `--interval` | não | segundos entre varreduras com a fila vazia (default `300`) |
+| `--short-interval` | não | segundos entre tarefas após uma execução (default `30`) |
 | `--rules-dir` | não | diretório das regras predefinidas (default `/app/rules`) |
 
 > `GH_TOKEN` é obrigatório (o `gh` lê de `GH_TOKEN`/`GITHUB_TOKEN`). As chaves de
 > provider (ex.: `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) são lidas pelo opencode a
 > partir do ambiente.
+
+## Rate limit e cache
+
+O loop trata erros do GitHub sem encerrar o agente: em caso de rate limit
+(`429`/`secondary rate limit`), ele faz *backoff* exponencial (até 3600s) e tenta
+de novo; outros erros apenas logam e o agente volta a dormir. Itens que ficaram
+com o `Worker` do próprio agente após uma interrupção são recuperados no início
+de cada ciclo.
+
+Para reduzir chamadas ao GraphQL, o resultado de `kanban list` é cacheado por
+30s em `.agent-watcher-cache-<project>.json` no workdir (compartilhado entre os
+agentes), e invalidado a cada mutação (`set`/`clear`/`create`). **Adicione esse
+arquivo ao `.gitignore` do repositório montado** para que o agente revisor não o
+commite acidentalmente.
 
 ## Regras
 

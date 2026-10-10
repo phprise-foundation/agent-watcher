@@ -54,18 +54,26 @@ def run_agent(config, number, title):
         log(f"opencode terminou com código {r.returncode}")
 
 
-def next_task(statuses):
-    rows = [i for i in kanban.items()
-            if i["status"] in statuses and not i["worker"] and not i["blocked"]]
-    rows.sort(key=lambda i: (statuses.index(i["status"]) if i["status"] in statuses else 99,
-                             kanban.sort_key(i)))
-    return rows[0] if rows else None
+def next_task(rows, statuses):
+    out = [i for i in rows
+           if i["status"] in statuses and not i["worker"] and not i["blocked"]]
+    out.sort(key=lambda i: (statuses.index(i["status"]) if i["status"] in statuses else 99,
+                            kanban.sort_key(i)))
+    return out[0] if out else None
 
 
-def next_blocked():
-    rows = [i for i in kanban.items() if i["blocked"] and not i["worker"]]
-    rows.sort(key=kanban.sort_key)
-    return rows[0] if rows else None
+def next_blocked(rows):
+    out = [i for i in rows if i["blocked"] and not i["worker"]]
+    out.sort(key=kanban.sort_key)
+    return out[0] if out else None
+
+
+def reclaim(rows, name):
+    """Limpa itens que ficaram com o Worker deste agente após uma interrupção."""
+    for i in rows:
+        if i["worker"] == name:
+            log(f"recuperando item órfão #{i['number']} (Worker={name})")
+            kanban.clear_field(i["number"], "Worker")
 
 
 def loop(config):
@@ -73,26 +81,33 @@ def loop(config):
     statuses = rules.combined_statuses(config["rules"])
     unblock = any(r.unblock for r in config["rules"])
     interval = config["interval"]
-    short = config.get("short_interval", 10)
+    short = config.get("short_interval", 30)
+    max_backoff = config.get("max_backoff", 3600)
 
     log(f"iniciado: name={name} statuses={statuses} unblock={unblock} "
         f"repo={config['repo']} project={config['project']} model={config['model']}")
 
+    backoff = short
     while True:
         try:
+            rows = kanban.items()
+            reclaim(rows, name)
+
             if unblock:
-                blk = next_blocked()
+                blk = next_blocked(rows)
                 if blk:
                     log(f"desbloqueando #{blk['number']} (status={blk['status']})")
                     kanban.set_field(blk["number"], "Worker", name)
                     run_agent(config, blk["number"], blk["title"])
                     kanban.clear_field(blk["number"], "Worker")
+                    backoff = short
                     time.sleep(short)
                     continue
 
-            task = next_task(statuses)
+            task = next_task(rows, statuses)
             if task is None:
                 log(f"fila vazia para {statuses or 'nada'}. dormindo {interval}s")
+                backoff = short
                 time.sleep(interval)
                 continue
 
@@ -100,10 +115,16 @@ def loop(config):
             kanban.set_field(task["number"], "Worker", name)
             run_agent(config, task["number"], task["title"])
             kanban.clear_field(task["number"], "Worker")
+            backoff = short
             time.sleep(short)
 
+        except kanban.RateLimitError as e:
+            log(f"rate limit: {e}. aguardando {backoff}s")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+
         except Exception as e:  # noqa: BLE001
-            log(f"erro no loop: {e}")
+            log(f"erro no loop: {e}. dormindo {interval}s")
             time.sleep(interval)
 
 

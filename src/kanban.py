@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 def owner():
     return os.environ.get("AW_OWNER", "")
@@ -42,9 +43,72 @@ def run(args):
     return subprocess.run(args, capture_output=True, text=True)
 
 
+class KanbanError(Exception):
+    pass
+
+
+class RateLimitError(KanbanError):
+    pass
+
+
+_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate limit", "abuse", "429")
+
+
+def _rate_limited(result):
+    text = f"{result.stderr or ''} {result.stdout or ''}".lower()
+    return any(m in text for m in _RATE_LIMIT_MARKERS)
+
+
+def gh(args):
+    """Roda um comando `gh` e converte falha em exceção (distinguindo rate limit)."""
+    r = run(args)
+    if r.returncode != 0:
+        err = (r.stderr or r.stdout or "").strip()
+        if _rate_limited(r):
+            raise RateLimitError(err or "rate limit do GitHub atingido")
+        raise KanbanError(err or f"falha ao executar {args[0]}")
+    return r
+
+
 def fail(msg):
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
+    raise KanbanError(msg)
+
+
+CACHE_TTL = 30
+
+
+def _cache_path():
+    base = os.environ.get("AW_WORKDIR") or os.getcwd()
+    return os.path.join(base, f".agent-watcher-cache-{project()}.json")
+
+
+def _cache_read(max_age):
+    try:
+        with open(_cache_path()) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if max_age is not None and time.time() - data.get("ts", 0) > max_age:
+        return None
+    return data.get("items")
+
+
+def _cache_store(items):
+    path = _cache_path()
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump({"ts": time.time(), "items": items}, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def invalidate_cache():
+    try:
+        os.remove(_cache_path())
+    except OSError:
+        pass
 
 
 def require_config():
@@ -54,10 +118,17 @@ def require_config():
 
 def items():
     require_config()
-    r = run(["gh", "project", "item-list", str(project()), "--owner", owner(),
-             "--format", "json", "--limit", "200"])
-    if r.returncode != 0:
-        fail(r.stderr.strip())
+    cached = _cache_read(CACHE_TTL)
+    if cached is not None:
+        return cached
+    try:
+        r = gh(["gh", "project", "item-list", str(project()), "--owner", owner(),
+                "--format", "json", "--limit", "200"])
+    except RateLimitError:
+        stale = _cache_read(None)
+        if stale is not None:
+            return stale
+        raise
     data = json.loads(r.stdout)
     out = []
     for it in data.get("items", []):
@@ -73,6 +144,7 @@ def items():
             "role": it.get("role") or "",
             "worker": it.get("worker") or "",
         })
+    _cache_store(out)
     return out
 
 
@@ -138,18 +210,16 @@ def set_field(number, field, value):
     if not value:
         return
     url = issue_url(number)
-    r = run(["gh", "project", "item-edit", str(project()), "--owner", owner(),
-             "--url", url, "--field", field, "--value", value])
-    if r.returncode != 0:
-        fail(r.stderr.strip())
+    gh(["gh", "project", "item-edit", str(project()), "--owner", owner(),
+        "--url", url, "--field", field, "--value", value])
+    invalidate_cache()
 
 
 def clear_field(number, field):
     url = issue_url(number)
-    r = run(["gh", "project", "item-edit", str(project()), "--owner", owner(),
-             "--url", url, "--field", field, "--clear"])
-    if r.returncode != 0:
-        fail(r.stderr.strip())
+    gh(["gh", "project", "item-edit", str(project()), "--owner", owner(),
+        "--url", url, "--field", field, "--clear"])
+    invalidate_cache()
 
 
 def cmd_set(args):
@@ -177,9 +247,7 @@ def cmd_comment(args):
     if args.body_file:
         with open(args.body_file) as f:
             body = f.read()
-    r = run(["gh", "issue", "comment", url, "--body", body])
-    if r.returncode != 0:
-        fail(r.stderr.strip())
+    gh(["gh", "issue", "comment", url, "--body", body])
 
 
 def cmd_create(args):
@@ -188,16 +256,12 @@ def cmd_create(args):
     if args.body_file:
         with open(args.body_file) as f:
             body = f.read()
-    r = run(["gh", "api", f"repos/{repo()}/issues",
-             "-f", f"title={args.title}", "-f", f"body={body}"])
-    if r.returncode != 0:
-        fail(r.stderr.strip())
+    r = gh(["gh", "api", f"repos/{repo()}/issues",
+            "-f", f"title={args.title}", "-f", f"body={body}"])
     data = json.loads(r.stdout)
     number = data["number"]
     url = data["html_url"]
-    r2 = run(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
-    if r2.returncode != 0:
-        fail(r2.stderr.strip())
+    gh(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
     set_field(number, "Status", args.status or "to-do")
     set_field(number, "Role", args.role)
     print(number)
@@ -255,7 +319,11 @@ def main():
     p.set_defaults(func=cmd_create)
 
     args = ap.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except KanbanError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

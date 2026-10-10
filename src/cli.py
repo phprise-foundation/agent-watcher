@@ -33,6 +33,8 @@ def main(argv=None):
                     help="diretório das regras predefinidas (default: /app/rules)")
     ap.add_argument("--interval", type=int, default=300,
                     help="segundos entre varreduras quando a fila está vazia (default 300)")
+    ap.add_argument("--short-interval", type=int, default=30,
+                    help="segundos entre tarefas após uma execução (default 30)")
     args = ap.parse_args(argv)
 
     parse_env(args.env)
@@ -44,6 +46,7 @@ def main(argv=None):
     os.environ["AW_REPO"] = args.repo
     os.environ["AW_PROJECT"] = str(args.project)
     os.environ["AW_RULES_DIR"] = args.rules_dir
+    os.environ["AW_WORKDIR"] = args.workdir
 
     if not os.path.isdir(args.workdir):
         raise SystemExit(f"--workdir não existe: {args.workdir}")
@@ -60,7 +63,7 @@ def main(argv=None):
         "workdir": args.workdir,
         "rules": loaded,
         "interval": args.interval,
-        "short_interval": 10,
+        "short_interval": args.short_interval,
     }
 
     watcher.run(config)
