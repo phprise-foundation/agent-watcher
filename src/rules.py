@@ -30,6 +30,7 @@ class Rule:
     statuses: list
     role: str
     unblock: bool
+    personality: str
     body: str
 
 
@@ -70,6 +71,7 @@ def load_rule(ref: str) -> Rule:
         statuses=statuses,
         role=meta.get("role") or "",
         unblock=bool(meta.get("unblock", False)),
+        personality=meta.get("personality") or "",
         body=body,
     )
 

@@ -8,7 +8,8 @@ import time
 import kanban
 import rules
 
-STATUSES_HELP = "to-do, qa-refinement, coding, reviewing, testing, done"
+STATUSES_HELP = ("intent, feasibility, design, plan, qa-refinement, "
+                 "coding, reviewing, testing, done")
 
 LLM_RATE_LIMIT_MARKERS = (
     "rate limit", "rate_limit", "429", "insufficient_quota", "insufficient quota",
@@ -26,17 +27,48 @@ def log(msg):
     print(f"[{ts}] {msg}", flush=True)
 
 
-def build_prompt(config, number, title):
+def build_prompt(config, number=None, title=None, mention=None):
+    name = config["name"]
     rule_bodies = "\n\n".join(r.body for r in config["rules"])
-    return f"""Você é "{config['name']}", um agente autônomo de desenvolvimento que atua em um quadro Kanban do GitHub (Project V2). Não há supervisor em tempo real: sua comunicação e o estado do trabalho vivem nas issues do GitHub.
+    personalities = "\n\n".join(r.personality for r in config["rules"] if r.personality)
+
+    if mention:
+        task_section = (
+            f"Você foi mencionado na issue #{mention['number']} ({mention['title']}).\n"
+            f"Trecho da menção: {mention['mention']}\n"
+            f"- Leia a issue e os comentários: gh issue view {mention['number']} --repo {config['repo']} --comments\n"
+            f"- Responda a cada menção a @{name} que ainda não tenha resposta, assinando com '{name}: '.\n"
+            f"- Ao terminar, limpe o Worker: kanban clear {mention['number']} --field Worker\n"
+        )
+    else:
+        task_section = (
+            f"Trabalhe na issue #{number} do repositório {config['repo']}.\n"
+            f"- Leia a issue e os comentários: gh issue view {number} --repo {config['repo']} --comments\n"
+            f"- Comunique-se SEMPRE via comentário, assinando com '{name}: '.\n"
+            f"- Ao finalizar, limpe o Worker: kanban clear {number} --field Worker\n"
+        )
+
+    return f"""Você é "{name}", um agente autônomo de desenvolvimento que atua em um quadro Kanban do GitHub (Project V2). Não há supervisor em tempo real: sua comunicação e o estado do trabalho vivem nas issues do GitHub.
+
+# Personalidade
+
+{personalities or "(não definida)"}
 
 # Regras do seu papel
 
 {rule_bodies}
 
+# Comunicação (via comentários na issue)
+
+- Toda comunicação acontece nos comentários da issue.
+- Para marcar/acionar um agente, escreva `@NomeDoAgente` no comentário.
+- Sempre assine seus comentários com `{name}: `.
+- Ao trabalhar numa issue, leia os comentários e responda a toda menção `@{name}` que ainda não tenha resposta sua.
+
 # Interação com o quadro (helper `kanban`)
 
 - Consultar: kanban list [--status <x>] [--blocked] [--json]
+- Menções pendentes: kanban mentions <nome>
 - Mudar estado: kanban set <n> --status <x> [--role <r>] [--worker <w>] [--blocked|--unblocked] [--blocked-by <tarefa>|--clear-blocked-by]
 - Limpar campo: kanban clear <n> --field Worker
 - Comentar: kanban comment <n> --text "..."
@@ -47,16 +79,13 @@ Statuses válidos (fluxo linear, os itens NÃO voltam; correção vira nova issu
 
 # Tarefa atual
 
-Trabalhe na issue #{number} do repositório {config['repo']}.
-- Leia a issue: gh issue view {number} --repo {config['repo']}
-- Comunique-se SEMPRE via comentário, assinando com '{config['name']}: ': gh issue comment {number} --repo {config['repo']} --body '{config['name']}: ...'
-- Ao finalizar, limpe o Worker: kanban clear {number} --field Worker
+{task_section}
 """
 
 
-def run_agent(config, number, title, model):
-    prompt = build_prompt(config, number, title)
-    log(f"invocando opencode para #{number} ({model})")
+def run_agent(config, model, prompt, number=None):
+    tag = f" para #{number}" if number is not None else ""
+    log(f"invocando opencode{tag} ({model})")
     with tempfile.TemporaryFile() as errf:
         r = subprocess.run(
             ["opencode", "run", "--auto", "--print-logs", "-m", model,
@@ -75,15 +104,16 @@ def run_agent(config, number, title, model):
     return "error"
 
 
-def process(config, name, number, title):
-    """Reclama, roda o opencode e libera o Worker. Retorna ok/rate_limited/error."""
+def process(config, name, number, title=None, mention=None):
+    """Reclama, roda o opencode (com fallback) e libera o Worker."""
     kanban.set_field(number, "Worker", name)
-    result = run_agent(config, number, title, config["model"])
+    prompt = build_prompt(config, number=number, title=title, mention=mention)
+    result = run_agent(config, config["model"], prompt, number)
     if result == "rate_limited":
         fallback = config.get("fallback_model")
         if fallback:
             log(f"rate limit no modelo principal; tentando fallback {fallback} em #{number}")
-            result = run_agent(config, number, title, fallback)
+            result = run_agent(config, fallback, prompt, number)
     kanban.clear_field(number, "Worker")
     return result
 
@@ -110,6 +140,15 @@ def reclaim(rows, name):
             kanban.clear_field(i["number"], "Worker")
 
 
+def _after(result, backoff, short, max_backoff):
+    if result == "rate_limited":
+        log(f"rate limit sem fallback. aguardando {backoff}s")
+        time.sleep(backoff)
+        return min(backoff * 2, max_backoff)
+    time.sleep(short)
+    return short
+
+
 def loop(config):
     name = config["name"]
     statuses = rules.combined_statuses(config["rules"])
@@ -117,28 +156,34 @@ def loop(config):
     interval = config["interval"]
     short = config.get("short_interval", 30)
     max_backoff = config.get("max_backoff", 3600)
+    mention_interval = config.get("mention_interval", interval)
 
     log(f"iniciado: name={name} statuses={statuses} unblock={unblock} "
         f"repo={config['repo']} project={config['project']} model={config['model']}")
 
     backoff = short
+    last_mention = 0.0
     while True:
         try:
             rows = kanban.items()
             reclaim(rows, name)
+
+            now = time.time()
+            if now - last_mention >= mention_interval:
+                last_mention = now
+                mention = kanban.next_mention(name)
+                if mention:
+                    log(f"respondendo menção @{name} em #{mention['number']} ({mention['status']})")
+                    result = process(config, name, mention["number"], mention=mention)
+                    backoff = _after(result, backoff, short, max_backoff)
+                    continue
 
             if unblock:
                 blk = next_blocked(rows)
                 if blk:
                     log(f"desbloqueando #{blk['number']} (status={blk['status']})")
                     result = process(config, name, blk["number"], blk["title"])
-                    if result == "rate_limited":
-                        log(f"rate limit sem fallback. aguardando {backoff}s")
-                        time.sleep(backoff)
-                        backoff = min(backoff * 2, max_backoff)
-                    else:
-                        backoff = short
-                        time.sleep(short)
+                    backoff = _after(result, backoff, short, max_backoff)
                     continue
 
             task = next_task(rows, statuses)
@@ -150,13 +195,7 @@ def loop(config):
 
             log(f"reclamando #{task['number']} ({task['status']})")
             result = process(config, name, task["number"], task["title"])
-            if result == "rate_limited":
-                log(f"rate limit sem fallback. aguardando {backoff}s")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, max_backoff)
-            else:
-                backoff = short
-                time.sleep(short)
+            backoff = _after(result, backoff, short, max_backoff)
 
         except kanban.RateLimitError as e:
             log(f"rate limit: {e}. aguardando {backoff}s")

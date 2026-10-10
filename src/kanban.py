@@ -161,6 +161,48 @@ def issue_url(number):
     return f"https://github.com/{repo()}/issues/{number}"
 
 
+def issue_comments(number):
+    r = gh(["gh", "issue", "view", str(number), "--repo", repo(), "--json", "comments"])
+    data = json.loads(r.stdout)
+    out = []
+    for c in data.get("comments", []):
+        out.append({
+            "body": c.get("body") or "",
+            "author": (c.get("author") or {}).get("login") or "",
+            "created_at": c.get("createdAt") or "",
+        })
+    out.sort(key=lambda c: c["created_at"])
+    return out
+
+
+def unresponded_mentions(name):
+    """Itens com menção `@name` ainda sem resposta subsequente do agente."""
+    marker = f"@{name}"
+    sig = f"{name}:"
+    out = []
+    for it in items():
+        if it["status"] == "done" or it["worker"]:
+            continue
+        comments = issue_comments(it["number"])
+        for i, c in enumerate(comments):
+            if marker in c["body"]:
+                answered = any(sig in d["body"] for d in comments[i + 1:])
+                if not answered:
+                    out.append({
+                        "number": it["number"],
+                        "title": it["title"],
+                        "status": it["status"],
+                        "mention": c["body"][:500],
+                    })
+                    break
+    return out
+
+
+def next_mention(name):
+    rows = unresponded_mentions(name)
+    return rows[0] if rows else None
+
+
 def cmd_list(args):
     rows = items()
     if args.role:
@@ -198,6 +240,15 @@ def cmd_get(args):
     if not rows:
         fail(f"no item for issue #{args.number}")
     print(json.dumps(rows[0], ensure_ascii=False))
+
+
+def cmd_mentions(args):
+    rows = unresponded_mentions(args.name)
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return
+    for r in rows:
+        print(f"#{r['number']}\t{r['status'] or '-'}\t{r['title']}")
 
 
 def cmd_busy(args):
@@ -295,6 +346,11 @@ def main():
     p = sub.add_parser("get")
     p.add_argument("number")
     p.set_defaults(func=cmd_get)
+
+    p = sub.add_parser("mentions")
+    p.add_argument("name")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_mentions)
 
     p = sub.add_parser("busy")
     p.set_defaults(func=cmd_busy)

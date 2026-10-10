@@ -12,23 +12,25 @@ credenciais via variáveis de ambiente.
 Cada container é **um agente** (um papel). Ele:
 
 1. Varre o quadro procurando issues no(s) status(s) do seu papel (sem `Worker` e sem `Blocked`).
-2. Reclama a issue (`Worker` = nome do agente).
-3. Invoca o opencode com as regras do papel + a issue.
-4. O próprio opencode faz o trabalho (código, testes, PR, revisão…) e atualiza o quadro.
-5. Libera o `Worker` e repete.
+2. Verifica menções pendentes (`@Nome` nos comentários) e responde.
+3. Reclama a issue (`Worker` = nome do agente).
+4. Invoca o opencode com as regras do papel + a issue.
+5. O próprio opencode faz o trabalho (código, testes, PR, revisão…) e atualiza o quadro.
+6. Libera o `Worker` e repete.
 
 ## Uso
 
 ```bash
 docker run -d \
-  --name hugo \
+  --name davi \
   -v "$(pwd):/workspace" \
   -e GH_TOKEN="$GH_TOKEN" \
   -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   esdrasschonevald/agent-watcher \
-  --name Hugo \
-  --rule orchestrator.md --rule revisor.md \
-  --model deepseek/deepseek-chat \
+  --name Davi \
+  --rule tech-lead.md \
+  --model deepseek/deepseek-v4-pro \
+  --fallback-model deepseek/deepseek-v4-flash \
   --repo phprise-foundation/koenma-id \
   --project 1 \
   --workdir /workspace
@@ -78,8 +80,10 @@ markdown com frontmatter:
 statuses: [reviewing]   # colunas que esta regra consome (ordem = prioridade)
 role: tech-lead         # valor do campo Role
 unblock: true           # opcional: este agente também cuida de itens bloqueados
+personality: >          # personalidade do agente (pré-definida pelo papel)
+  Atencioso e detalhista...
 ---
-# Revisor
+# Tech Lead
 ... instruções ...
 ```
 
@@ -87,11 +91,14 @@ unblock: true           # opcional: este agente também cuida de itens bloqueado
 
 | Regra | `statuses` | `role` | `unblock` |
 |---|---|---|---|
-| `orchestrator.md` | `to-do` | `tech-lead` | sim |
-| `revisor.md` | `reviewing` | `tech-lead` | — |
+| `solutions-architect.md` | `feasibility` | `solutions-architect` | — |
+| `systems-architect.md` | `design` | `systems-architect` | — |
+| `framework-architect.md` | `plan` | `framework-architect` | — |
+| `tech-lead.md` | `reviewing` | `tech-lead` | sim |
+| `quality-assurance.md` | `qa-refinement`, `testing` | `qa` | — |
 | `coder.md` | `coding` | `coder` | — |
-| `qa.md` | `qa-refinement`, `testing` | `qa` | — |
-| `product-owner.md` | `to-do` | `product-owner` | — |
+
+> O `product-owner` (status `intent`) fica para uma fase futura.
 
 Para usar uma regra customizada, monte o arquivo e passe o caminho:
 
@@ -100,14 +107,23 @@ docker run -d ... -v "$(pwd)/rules:/rules" ... \
   --rule /rules/meu-cargo.md
 ```
 
+## Menções entre agentes
+
+Toda a comunicação entre agentes acontece nos **comentários da issue**. Para
+acionar um agente, escreva `@NomeDoAgente` no comentário (o mesmo valor de
+`--name`). O agente, ao varrer o quadro, detecta menções `@Nome` que ainda não
+foram respondidas (não há comentário posterior assinado com `Nome: `) e responde.
+
+Os agentes sempre assinam seus comentários com `Nome: ` no início.
+
 ## Quadro esperado
 
 O Project V2 deve ter estes campos:
 
-- `Status` (single-select): `to-do → qa-refinement → coding → reviewing → testing → done` (fluxo linear; itens **não voltam** — correção vira nova issue).
+- `Status` (single-select): `intent → feasibility → design → plan → qa-refinement → coding → reviewing → testing → done` (fluxo linear; itens **não voltam** — correção vira nova issue).
 - `Blocked` (single-select, opção `blocked`): flag booleana independente do status.
 - `BlockedBy` (texto): quando bloqueado, indica qual tarefa/issue está bloqueando (ex.: `RFC-2`). Usado pelo Tech Lead para decidir o desbloqueio.
-- `Role` (single-select): `product-owner | tech-lead | qa | coder`.
+- `Role` (single-select): `product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder`.
 - `Worker` (single-select): nome do agente em execução.
 
 ## Build da imagem
@@ -128,6 +144,7 @@ docker push esdrasschonevald/agent-watcher:latest
 ```bash
 pip install pyyaml        # (ou apk add py3-yaml)
 export GH_TOKEN=... AW_OWNER=... AW_REPO=... AW_PROJECT=...
-python3 src/cli.py --name Hugo --rule orchestrator.md --rule revisor.md \
-  --model deepseek/deepseek-chat --repo OWNER/REPO --project 1 --workdir .
+python3 src/cli.py --name Davi --rule tech-lead.md \
+  --model deepseek/deepseek-v4-pro --fallback-model deepseek/deepseek-v4-flash \
+  --repo OWNER/REPO --project 1 --workdir .
 ```
