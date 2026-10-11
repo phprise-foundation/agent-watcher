@@ -1,19 +1,19 @@
-"""Carregamento de regras (--rule) com frontmatter YAML.
+"""Loading of rules (--rule) with YAML frontmatter.
 
-Cada regra é um arquivo markdown:
+Each rule is a markdown file:
 
     ---
-    statuses: [reviewing]   # colunas do quadro que esta regra consome (ordem = prioridade)
-    role: tech-lead         # valor do campo Role que este agente representa
-    unblock: true           # opcional: este agente também cuida de itens bloqueados
-    interactive: true       # opcional: responde a novos comentários do usuário em vez de reprocessar
+    statuses: [reviewing]   # board columns this rule consumes (order = priority)
+    role: tech-lead         # value of the Role field this agent represents
+    unblock: true           # optional: this agent also handles blocked items
+    interactive: true       # optional: acts on new user comments instead of reprocessing
     ---
-    # Revisor
-    ... instruções ...
+    # Tech Lead
+    ... instructions ...
 
-A referência passada em `--rule` pode ser:
-  - um nome predefinido (ex.: "revisor" -> <rules_dir>/revisor.md)
-  - um caminho montado no container (ex.: "/rules/meu-cargo.md")
+The reference passed in `--rule` can be:
+  - a predefined name (e.g. "tech-lead" -> <rules_dir>/tech-lead.md)
+  - a path mounted in the container (e.g. "/rules/my-role.md")
 """
 import dataclasses
 import os
@@ -46,7 +46,7 @@ def _resolve(ref: str) -> pathlib.Path:
         cand = RULES_DIR / f"{ref}.md"
     if cand.exists():
         return cand
-    raise FileNotFoundError(f"regra não encontrada: {ref}")
+    raise FileNotFoundError(f"rule not found: {ref}")
 
 
 def _parse(text: str):
@@ -84,7 +84,7 @@ def load_rules(refs: list) -> list:
 
 
 def combined_statuses(rules: list) -> list:
-    """União ordenada dos statuses de todas as regras (preserva a ordem)."""
+    """Ordered union of the statuses of all rules (preserves order)."""
     seen = []
     for r in rules:
         for s in r.statuses:

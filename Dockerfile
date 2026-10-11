@@ -1,8 +1,8 @@
-# agent-watcher — agente autônomo de Kanban (GitHub Project V2) em container.
-# Base: imagem oficial do opencode (já traz o CLI em /usr/local/bin/opencode).
+# agent-watcher — autonomous Kanban agent (GitHub Project V2) in a container.
+# Base: official opencode image (already ships the CLI at /usr/local/bin/opencode).
 FROM ghcr.io/anomalyco/opencode:latest
 
-# gh (GitHub CLI), git, bash e python3 (+ yaml) para o helper e o loop.
+# gh (GitHub CLI), git, bash and python3 (+ yaml) for the helper and the loop.
 RUN apk add --no-cache bash git python3 py3-yaml github-cli
 
 WORKDIR /app

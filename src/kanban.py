@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""kanban — helper de quadro (GitHub Projects V2) para os agentes.
+"""kanban — board helper (GitHub Projects V2) for the agents.
 
-Lê a configuração do ambiente:
-  AW_OWNER    login da org/usuário dono do projeto (ex.: phprise-foundation)
-  AW_REPO     repositório no formato owner/repo (ex.: phprise-foundation/koenma-id)
-  AW_PROJECT  número do Project V2 (ex.: 1)
+Reads configuration from the environment:
+  AW_OWNER    org/user login that owns the project (e.g. phprise-foundation)
+  AW_REPO     repository as owner/repo (e.g. phprise-foundation/koenma-id)
+  AW_PROJECT  Project V2 number (e.g. 1)
 
-Campos do quadro esperados:
+Expected board fields:
   Status   (single-select): intent -> feasibility -> design -> plan -> qa-refinement -> coding -> reviewing -> testing -> done
-  Blocked  (single-select): opção "blocked" setada = bloqueado, vazia = livre
+  Blocked  (single-select): option "blocked" set = blocked, empty = free
   Role     (single-select): product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder
-  Worker   (single-select): nome do agente que está trabalhando
+  Worker   (text): name of the agent currently working on the item
 
-O fluxo é linear (itens NÃO voltam); correção gera uma nova issue.
+The flow is linear (items do NOT move backwards); a fix creates a new issue.
 """
 import argparse
 import json
@@ -51,8 +51,8 @@ class RateLimitError(KanbanError):
     pass
 
 
-# "unknown owner type" é o que o `gh project` retorna quando a resolução do
-# owner falha por rate limit do GraphQL (a query user/org volta com erro).
+# "unknown owner type" is what `gh project` returns when owner resolution
+# fails due to a GraphQL rate limit (the user/org query comes back with an error).
 _RATE_LIMIT_MARKERS = ("rate limit", "secondary rate limit", "abuse", "429",
                        "unknown owner type")
 
@@ -63,13 +63,13 @@ def _rate_limited(result):
 
 
 def gh(args):
-    """Roda um comando `gh` e converte falha em exceção (distinguindo rate limit)."""
+    """Run a `gh` command and turn failure into an exception (distinguishing rate limit)."""
     r = run(args)
     if r.returncode != 0:
         err = (r.stderr or r.stdout or "").strip()
         if _rate_limited(r):
-            raise RateLimitError(err or "rate limit do GitHub atingido")
-        raise KanbanError(err or f"falha ao executar {args[0]}")
+            raise RateLimitError(err or "GitHub rate limit reached")
+        raise KanbanError(err or f"failed to run {args[0]}")
     return r
 
 
@@ -82,7 +82,7 @@ LOCK_MAX_AGE = 120
 
 
 def _cache_ttl():
-    """TTL do cache em segundos (configurável via AW_CACHE_TTL)."""
+    """Cache TTL in seconds (configurable via AW_CACHE_TTL)."""
     try:
         return max(5, int(os.environ.get("AW_CACHE_TTL", "60")))
     except ValueError:
@@ -131,7 +131,7 @@ def invalidate_cache():
 
 
 def _acquire_lock():
-    """Tenta adquirir o lock de fetch — só um agente refaz a query por vez."""
+    """Try to acquire the fetch lock — only one agent re-runs the query at a time."""
     path = _lock_path()
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -161,7 +161,7 @@ def _release_lock():
 
 def require_config():
     if not owner() or not project() or not repo():
-        fail("config ausente: defina AW_OWNER, AW_REPO e AW_PROJECT")
+        fail("missing config: set AW_OWNER, AW_REPO and AW_PROJECT")
 
 
 def items():
@@ -174,7 +174,7 @@ def items():
             return _fetch_and_store()
         finally:
             _release_lock()
-    # outro agente está buscando: aguarda o cache aparecer, depois usa stale
+    # another agent is fetching: wait for the cache to appear, then use stale
     for _ in range(10):
         time.sleep(0.5)
         fresh = _cache_read(_cache_ttl())
@@ -217,7 +217,7 @@ fragment Board on ProjectV2 {
 
 
 def _fetch_board():
-    """Busca o quadro inteiro (itens + comentários) numa única query GraphQL."""
+    """Fetch the whole board (items + comments) in a single GraphQL query."""
     r = gh(["gh", "api", "graphql",
             "-f", f"query={_BOARD_QUERY}",
             "-f", f"login={owner()}",
@@ -234,7 +234,7 @@ def _parse_board(data):
             project = node["projectV2"]
             break
     if project is None:
-        raise KanbanError("projeto não encontrado (owner/project inválidos?)")
+        raise KanbanError("project not found (invalid owner/project?)")
     out = []
     for it in ((project.get("items") or {}).get("nodes")) or []:
         content = it.get("content") or {}
@@ -297,7 +297,7 @@ def issue_url(number):
 
 
 def unresponded_mentions(name):
-    """Itens com menção `@name` ainda sem resposta subsequente do agente."""
+    """Items with a mention `@name` still without a subsequent reply from the agent."""
     marker = f"@{name}"
     sig = f"{name}:"
     out = []
@@ -325,15 +325,15 @@ def next_mention(name):
 
 
 def unresponded_comments(name, statuses):
-    """Itens (nos `statuses`) com atividade do usuário ainda não respondida pelo agente.
+    """Items (in `statuses`) with user activity not yet answered by the agent.
 
-    Um item é acionável quando:
-      - não tem comentários (necessidade nova no backlog), ou
-      - o último comentário NÃO foi assinado pelo agente (`name: `), ou seja, há
-        uma resposta nova do usuário aguardando análise.
+    An item is actionable when:
+      - it has no comments (new backlog need), or
+      - the last comment is NOT signed by the agent (`name: `), i.e. there is a
+        new user reply waiting for analysis.
 
-    Isso evita reprocessar a mesma issue a cada varredura (ralo de tokens), sem
-    precisar editar/desmarcar comentários.
+    This avoids reprocessing the same issue on every scan (token drain), without
+    editing/unmarking comments.
     """
     sig = f"{name}:"
     out = []

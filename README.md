@@ -1,24 +1,24 @@
 # agent-watcher
 
-Agente autônomo que opera um quadro **Kanban do GitHub (Project V2)** dentro de um
-container Docker, usando [opencode](https://opencode.ai) como runtime de IA.
+Autonomous agent that operates a **GitHub Kanban board (Project V2)** inside a
+Docker container, using [opencode](https://opencode.ai) as the AI runtime.
 
-Roda em qualquer máquina com Docker — sem depender do ambiente do cliente para
-`opencode`, `gh` ou Python. Você só monta o diretório do projeto e passa as
-credenciais via variáveis de ambiente.
+Runs on any machine with Docker — without depending on the client's environment
+for `opencode`, `gh` or Python. You just mount the project directory and pass
+credentials via environment variables.
 
-## Como funciona
+## How it works
 
-Cada container é **um agente** (um papel). Ele:
+Each container is **one agent** (one role). It:
 
-1. Varre o quadro procurando issues no(s) status(s) do seu papel (sem `Worker` e sem `Blocked`).
-2. Verifica menções pendentes (`@Nome` nos comentários) e responde.
-3. Reclama a issue (`Worker` = nome do agente).
-4. Invoca o opencode com as regras do papel + a issue.
-5. O próprio opencode faz o trabalho (código, testes, PR, revisão…) e atualiza o quadro.
-6. Libera o `Worker` e repete.
+1. Scans the board looking for issues in the status(es) of its role (no `Worker` and no `Blocked`).
+2. Checks pending mentions (`@Name` in the comments) and replies.
+3. Claims the issue (`Worker` = agent name).
+4. Invokes opencode with the role's rules + the issue.
+5. opencode itself does the work (code, tests, PR, review…) and updates the board.
+6. Releases the `Worker` and repeats.
 
-## Uso
+## Usage
 
 ```bash
 docker run -d \
@@ -37,191 +37,197 @@ docker run -d \
   --workdir /workspace
 ```
 
-### Parâmetros
+### Parameters
 
-| Flag | Obrig. | Descrição |
+| Flag | Req. | Description |
 |---|---|---|
-| `--name` | sim | identidade do agente (assina comentários e o campo `Worker`) |
-| `--rule` | sim | regra (predefinida ou caminho), **sem** a extensão `.md`. Repetível. |
-| `--profile` | não | perfil de personalidade (nome predefinido ou caminho `.yaml`). Se omitido, usa a personalidade padrão da rule |
-| `--model` | sim | modelo no formato `provider/model` |
-| `--fallback-model` | não | modelo alternativo usado **apenas na iteração atual** quando o principal retorna rate limit/quota (429). Sem fallback, o agente volta a dormir e reprocessa na próxima janela |
-| `--repo` | sim | repositório `owner/repo` |
-| `--project` | sim | número do Project V2 |
-| `--workdir` | sim | diretório de trabalho (montado) |
-| `--env` | não | `KEY=VALUE` exportada para o processo. Repetível (alternativa a `-e`) |
-| `--interval` | não | segundos entre varreduras com a fila vazia (default `300`) |
-| `--short-interval` | não | segundos entre tarefas após uma execução (default `30`) |
-| `--rules-dir` | não | diretório das regras predefinidas (default `/app/rules`) |
-| `--profiles-dir` | não | diretório dos perfis predefinidos (default `/app/profiles`) |
+| `--name` | yes | agent identity (signs comments and the `Worker` field) |
+| `--rule` | yes | rule (predefined or path), **without** the `.md` extension. Repeatable. |
+| `--profile` | no | personality profile (predefined name or `.yaml` path). If omitted, uses the rule's default personality |
+| `--model` | yes | model in `provider/model` format |
+| `--fallback-model` | no | fallback model used **only in the current iteration** when the primary returns rate limit/quota (429). Without a fallback, the agent goes back to sleep and reprocesses on the next window |
+| `--repo` | yes | `owner/repo` repository |
+| `--project` | yes | Project V2 number |
+| `--workdir` | yes | working directory (mounted) |
+| `--env` | no | `KEY=VALUE` exported to the process. Repeatable (alternative to `-e`) |
+| `--interval` | no | seconds between scans when the queue is empty (default `300`) |
+| `--short-interval` | no | seconds between tasks after a run (default `30`) |
+| `--rules-dir` | no | predefined rules directory (default `/app/rules`) |
+| `--profiles-dir` | no | predefined profiles directory (default `/app/profiles`) |
 
-> `GH_TOKEN` é obrigatório (o `gh` lê de `GH_TOKEN`/`GITHUB_TOKEN`). As chaves de
-> provider (ex.: `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) são lidas pelo opencode a
-> partir do ambiente.
+> `GH_TOKEN` is required (`gh` reads it from `GH_TOKEN`/`GITHUB_TOKEN`). Provider
+> keys (e.g. `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) are read by opencode from
+> the environment.
 
-## Rate limit e cache
+## Rate limit and cache
 
-O loop trata erros do GitHub sem encerrar o agente: em caso de rate limit
-(`429`/`secondary rate limit`), ele faz *backoff* exponencial (até 3600s) e tenta
-de novo; outros erros apenas logam e o agente volta a dormir. Itens que ficaram
-com o `Worker` do próprio agente após uma interrupção são recuperados no início
-de cada ciclo.
+The loop handles GitHub errors without stopping the agent: on rate limit
+(`429`/`secondary rate limit`) it does exponential *backoff* (up to 3600s) and
+tries again; other errors only log and the agent goes back to sleep. Items left
+with the agent's own `Worker` after an interruption are recovered at the start
+of each cycle.
 
-Para reduzir chamadas à API, o quadro **inteiro** (itens + campos + comentários)
-é buscado numa única query GraphQL e cacheado em
-`.agent-watcher-cache-<project>.json` no workdir (compartilhado entre os agentes).
-Um *lock* garante que, quando o TTL expira, **só um** agente refaz a busca — os
-demais leem o cache (ou o stale). O TTL é configurável via `AW_CACHE_TTL`
-(default **60s**) e o cache é invalidado a cada mutação (`set`/`clear`/`create`).
+To reduce API calls, the **whole** board (items + fields + comments) is fetched
+in a single GraphQL query and cached in `.agent-watcher-cache-<project>.json` in
+the workdir (shared between agents). A *lock* ensures that, when the TTL
+expires, **only one** agent re-runs the fetch — the others read the cache (or the
+stale one). The TTL is configurable via `AW_CACHE_TTL` (default **60s**) and the
+cache is invalidated on every mutation (`set`/`clear`/`create`).
 
-Em caso de rate limit/falha do GitHub, o agente cai para o **cache stale** e
-continua operando sem nova requisição. **Adicione o arquivo ao `.gitignore` do
-repositório montado** para que o agente revisor não o commite acidentalmente.
+On GitHub rate limit/failure, the agent falls back to the **stale cache** and
+keeps operating without new requests. **Add the file to the `.gitignore` of the
+mounted repository** so the reviewer agent doesn't accidentally commit it.
 
-## Regras
+## Rules
 
-Regras definem **o que o agente faz** e são composáveis. Cada `--rule` é um
-markdown com frontmatter:
+Rules define **what the agent does** and are composable. Each `--rule` is a
+markdown with frontmatter:
 
 ```markdown
 ---
-statuses: [reviewing]   # colunas que esta regra consome (ordem = prioridade)
-role: tech-lead         # valor do campo Role
-unblock: true           # opcional: este agente também cuida de itens bloqueados
-interactive: true       # opcional: age sobre novos comentários do usuário (não reprocessa o já respondido)
-personality: >          # personalidade do agente (pré-definida pelo papel)
-  Atencioso e detalhista...
+statuses: [reviewing]   # board columns this rule consumes (order = priority)
+role: tech-lead         # value of the Role field
+unblock: true           # optional: this agent also handles blocked items
+interactive: true       # optional: acts on new user comments instead of reprocessing
+personality: >          # agent personality (predefined by the role)
+  Attentive and detail-oriented...
 ---
 # Tech Lead
-... instruções ...
+... instructions ...
 ```
 
-### Regras predefinidas (em `/app/rules/`)
+### Predefined rules (in `/app/rules/`)
 
-| Regra | `statuses` | `role` | `unblock` |
+| Rule | `statuses` | `role` | `unblock` |
 |---|---|---|---|
 | `product-owner` | `intent` | `product-owner` | — |
 | `solutions-architect` | `feasibility` | `solutions-architect` | — |
 | `systems-architect` | `design` | `systems-architect` | — |
 | `framework-architect` | `plan` | `framework-architect` | — |
-| `tech-lead` | `reviewing` | `tech-lead` | sim |
+| `tech-lead` | `reviewing` | `tech-lead` | yes |
 | `quality-assurance` | `qa-refinement`, `testing` | `qa` | — |
 | `coder` | `coding` | `coder` | — |
 
-Para usar uma regra customizada, monte o arquivo e passe o caminho (com ou sem `.md`):
+To use a custom rule, mount the file and pass the path (with or without `.md`):
 
 ```bash
 docker run -d ... -v "$(pwd)/rules:/rules" ... \
-  --rule meu-cargo
+  --rule my-role
 ```
 
-## Perfis de personalidade (em `/app/profiles/`)
+## Personality profiles (in `/app/profiles/`)
 
-Perfis são arquivos YAML que descrevem o comportamento/estilo da IA. Quando
-`--profile` é informado, ele substitui a `personality` padrão da rule. Sem
-`--profile`, o agente usa a `personality` definida no frontmatter de cada rule.
+Profiles are YAML files describing the AI's behavior/style. When `--profile` is
+provided, it replaces the rule's default `personality`. Without `--profile`, the
+agent uses the `personality` defined in each rule's frontmatter.
 
-| Perfil | Ideia central |
+| Profile | Core idea |
 |---|---|
-| `socratic` | desconstruir certezas, causa raiz, imparcialidade (recomendado p/ Product Owner) |
-| `nerd` | raciocínio profundo, listas, processo rigoroso |
-| `professor` | mestre exigente que revisa e ensina |
-| `firebrand` | energia, urgência e decisão por intuição |
-| `gallant` | calor, cortesia e cuidado com as pessoas |
-| `skeptic` | dúvida constante e investigação honesta |
-| `goth` | mistério, charme sombrio e cultura geek |
-| `pacifist` | harmonia, consenso e escuta ativa |
-| `activist` | alegria contagiante e fervor por causas |
+| `socratic` | deconstruct certainties, root cause, impartiality (recommended for Product Owner) |
+| `nerd` | deep reasoning, lists, rigorous process |
+| `professor` | demanding master who reviews and teaches |
+| `firebrand` | energy, urgency and intuition-driven decisions |
+| `gallant` | warmth, courtesy and care for people |
+| `skeptic` | constant doubt and honest investigation |
+| `goth` | mystery, dark charm and geek culture |
+| `pacifist` | harmony, consensus and active listening |
+| `activist` | contagious joy and fervor for causes |
 
-Estrutura universal de um perfil:
+Universal profile structure:
 
 ```yaml
 profile_name: ""
-descricao_estilo: ""
+style_description: ""
 
-atributos_psicologicos:   # escalas 0 a 10
-  entusiasmo: 0
-  formalidade: 0
-  confianca: 0
-  metodismo: 0
-  critica: 0
-  empatia: 0
-  jogo_de_cintura: 0
+psychological_attributes:   # 0 to 10 scales
+  enthusiasm: 0
+  formality: 0
+  confidence: 0
+  methodicalness: 0
+  criticality: 0
+  empathy: 0
+  adaptability: 0
 
-comunicacao:
-  tom_de_voz: ""
-  palavras_chave: []
-  expressoes_proibidas: []
-  uso_de_emojis: ""       # Nunca, Moderado, Frequente
+communication:
+  tone_of_voice: ""
+  keywords: []
+  forbidden_expressions: []
+  emoji_usage: ""            # Never, Moderate, Frequent
 
-bagagem_cultural:
-  livros_inspiradores: []
-  referencias_e_pessoas: []
+cultural_background:
+  inspiring_books: []
+  references_and_people: []
   hobbies: []
-  musicas_e_ritmos: []
-  arquetipo: ""
+  music_and_rhythms: []
+  archetype: ""
 
-diretrizes_de_comportamento: []
-vieses_e_restricoes: []
+behavior_guidelines: []
+biases_and_restrictions: []
 ```
 
-Para usar um perfil customizado, monte o arquivo e passe o caminho:
+To use a custom profile, mount the file and pass the path:
 
 ```bash
 docker run -d ... -v "$(pwd)/profiles:/profiles" ... \
-  --profile /profiles/meu-perfil.yaml
+  --profile /profiles/my-profile.yaml
 ```
 
-## Menções entre agentes
+## Mentions between agents
 
-Toda a comunicação entre agentes acontece nos **comentários da issue**. Para
-acionar um agente, escreva `@NomeDoAgente` no comentário (o mesmo valor de
-`--name`). O agente, ao varrer o quadro, detecta menções `@Nome` que ainda não
-foram respondidas (não há comentário posterior assinado com `Nome: `) e responde.
+All communication between agents happens in the **issue comments**. To trigger an
+agent, write `@AgentName` in a comment (the same value as `--name`). The agent,
+when scanning the board, detects `@Name` mentions that have not been answered yet
+(no later comment signed with `Name: `) and replies.
 
-Os agentes sempre assinam seus comentários com `Nome: ` no início.
+Agents always sign their comments with `Name: ` at the start.
 
-## Evitando acionamentos repetidos (ralo de tokens)
+## Avoiding repeated triggers (token drain)
 
-Uma menção `@Nome` só é tratada como pendente se **não** houver um comentário
-posterior assinado com `Nome: `. Ou seja: assim que o agente responde, a menção
-fica "resolvida" e não volta a acionar o agente nas varreduras seguintes — sem
-precisar editar/desmarcar o comentário.
+A `@Name` mention is only treated as pending if there is **no** later comment
+signed with `Name: `. In other words: as soon as the agent replies, the mention
+is "resolved" and no longer triggers the agent on subsequent scans — without
+editing/unmarking the comment.
 
-Para papéis que **ficam no mesmo status** durante uma conversa (ex.: o
-Product Owner em `intent`, conversando com o cliente antes de criar a RFC), use
-`interactive: true` no frontmatter da rule. Nesse modo o agente só processa um
-item quando há atividade nova do usuário (item sem comentários ou último
-comentário não assinado por ele), evitando reprocessar a mesma issue a cada
-ciclo.
+For roles that **stay in the same status** during a conversation (e.g. the
+Product Owner in `intent`, talking to the client before creating the RFC), use
+`interactive: true` in the rule's frontmatter. In this mode the agent only
+processes an item when there is new user activity (an item with no comments, or
+whose last comment is not signed by it), avoiding reprocessing the same issue
+every cycle.
 
-## Quadro esperado
+## Language
 
-O Project V2 deve ter estes campos:
+Agents always reply **in the language the issue was opened in** (title and body):
+if the issue is in Portuguese, the replies are in Portuguese; if in Korean, in
+Korean; and so on.
 
-- `Status` (single-select): `intent → feasibility → design → plan → qa-refinement → coding → reviewing → testing → done` (fluxo linear; itens **não voltam** — correção vira nova issue).
-- `Blocked` (single-select, opção `blocked`): flag booleana independente do status.
-- `BlockedBy` (texto): quando bloqueado, indica qual tarefa/issue está bloqueando (ex.: `RFC-2`). Usado pelo Tech Lead para decidir o desbloqueio.
+## Expected board
+
+The Project V2 must have these fields:
+
+- `Status` (single-select): `intent → feasibility → design → plan → qa-refinement → coding → reviewing → testing → done` (linear flow; items **do not go back** — a fix creates a new issue).
+- `Blocked` (single-select, option `blocked`): boolean flag independent of status.
+- `BlockedBy` (text): when blocked, indicates which task/issue is blocking (e.g. `RFC-2`). Used by the Tech Lead to decide on unblocking.
 - `Role` (single-select): `product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder`.
-- `Worker` (**texto**): nome do agente em execução. Deve ser texto (não single-select) para que o nome seja livre — cada pessoa escolhe o `--name` ao subir o agente.
+- `Worker` (**text**): name of the agent currently running. Must be text (not single-select) so the name is free — each person chooses the `--name` when starting the agent.
 
-## Build da imagem
+## Building the image
 
 ```bash
 docker build -t agent-watcher .
 ```
 
-Publicar (Docker Hub):
+Publish (Docker Hub):
 
 ```bash
 docker tag agent-watcher esdrasschonevald/agent-watcher:latest
 docker push esdrasschonevald/agent-watcher:latest
 ```
 
-## Desenvolvimento local (sem Docker)
+## Local development (without Docker)
 
 ```bash
-pip install pyyaml        # (ou apk add py3-yaml)
+pip install pyyaml        # (or apk add py3-yaml)
 export GH_TOKEN=... AW_OWNER=... AW_REPO=... AW_PROJECT=...
 python3 src/cli.py --name Davi --rule tech-lead \
   --model deepseek/deepseek-v4-pro --fallback-model deepseek/deepseek-v4-flash \

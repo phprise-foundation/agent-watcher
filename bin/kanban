@@ -1,5 +1,5 @@
 #!/bin/sh
-# Helper de quadro (kanban) usado tanto pelo loop quanto pelos agentes opencode.
+# Board helper (kanban) used by both the loop and the opencode agents.
 if [ -d /app/src ]; then
     exec python3 /app/src/kanban.py "$@"
 else
