@@ -198,7 +198,7 @@ O Project V2 deve ter estes campos:
 - `Blocked` (single-select, opção `blocked`): flag booleana independente do status.
 - `BlockedBy` (texto): quando bloqueado, indica qual tarefa/issue está bloqueando (ex.: `RFC-2`). Usado pelo Tech Lead para decidir o desbloqueio.
 - `Role` (single-select): `product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder`.
-- `Worker` (single-select): nome do agente em execução.
+- `Worker` (**texto**): nome do agente em execução. Deve ser texto (não single-select) para que o nome seja livre — cada pessoa escolhe o `--name` ao subir o agente.
 
 ## Build da imagem
 
