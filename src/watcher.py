@@ -27,6 +27,18 @@ def log(msg):
     print(f"[{ts}] {msg}", flush=True)
 
 
+def board_context(config):
+    if config.get("backend") == "local":
+        return "a self-hosted Kanban board"
+    return f"a GitHub Kanban board (Project V2) for repository {config['repo']}"
+
+
+def read_hint(config, number):
+    if config.get("backend") == "local":
+        return f"kanban get {number}"
+    return f"gh issue view {number} --repo {config['repo']} --comments"
+
+
 def build_prompt(config, number=None, title=None, mention=None):
     name = config["name"]
     rule_bodies = "\n\n".join(r.body for r in config["rules"])
@@ -38,21 +50,21 @@ def build_prompt(config, number=None, title=None, mention=None):
 
     if mention:
         task_section = (
-            f"You were mentioned in issue #{mention['number']} ({mention['title']}).\n"
+            f"You were mentioned in item #{mention['number']} ({mention['title']}).\n"
             f"Mention snippet: {mention['mention']}\n"
-            f"- Read the issue and comments: gh issue view {mention['number']} --repo {config['repo']} --comments\n"
+            f"- Read the item and comments: {read_hint(config, mention['number'])}\n"
             f"- Answer every mention of @{name} that has no reply yet, signing with '{name}: '.\n"
             f"- When done, clear the Worker: kanban clear {mention['number']} --field Worker\n"
         )
     else:
         task_section = (
-            f"Work on issue #{number} in repository {config['repo']}.\n"
-            f"- Read the issue and comments: gh issue view {number} --repo {config['repo']} --comments\n"
+            f"Work on item #{number}.\n"
+            f"- Read the item and comments: {read_hint(config, number)}\n"
             f"- ALWAYS communicate via comment, signing with '{name}: '.\n"
             f"- When done, clear the Worker: kanban clear {number} --field Worker\n"
         )
 
-    return f"""You are "{name}", an autonomous development agent operating on a GitHub Kanban board (Project V2). There is no real-time supervisor: your communication and the state of the work live in the GitHub issues.
+    return f"""You are "{name}", an autonomous development agent operating on {board_context(config)}. There is no real-time supervisor: your communication and the state of the work live in the board items.
 
 # Personality
 
@@ -164,9 +176,9 @@ def loop(config):
     max_backoff = config.get("max_backoff", 3600)
     mention_interval = config.get("mention_interval", interval)
 
-    log(f"started: name={name} statuses={statuses} unblock={unblock} "
-        f"interactive={interactive} "
-        f"repo={config['repo']} project={config['project']} model={config['model']}")
+    log(f"started: name={name} backend={config.get('backend', 'github')} "
+        f"statuses={statuses} unblock={unblock} interactive={interactive} "
+        f"target={config.get('kanban_url') or config.get('repo')} model={config['model']}")
 
     backoff = short
     last_mention = 0.0

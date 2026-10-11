@@ -1,7 +1,9 @@
 # agent-watcher
 
-Autonomous agent that operates a **GitHub Kanban board (Project V2)** inside a
-Docker container, using [opencode](https://opencode.ai) as the AI runtime.
+Autonomous agent that operates a **Kanban board** inside a Docker container,
+using [opencode](https://opencode.ai) as the AI runtime. The board can be a
+**GitHub Project V2** or a **self-hosted [multi-agent](https://github.com/phprise-foundation/multi-agent)
+board** (REST API), selected with `--backend`.
 
 Runs on any machine with Docker — without depending on the client's environment
 for `opencode`, `gh` or Python. You just mount the project directory and pass
@@ -20,6 +22,8 @@ Each container is **one agent** (one role). It:
 
 ## Usage
 
+Against a **GitHub Project V2** (the default `--backend github`):
+
 ```bash
 docker run -d \
   --name davi \
@@ -37,6 +41,22 @@ docker run -d \
   --workdir /workspace
 ```
 
+Against a **self-hosted board** (`--backend local`):
+
+```bash
+docker run -d \
+  --name davi \
+  -v "$(pwd):/workspace" \
+  -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+  esdrasschonevald/agent-watcher \
+  --name Davi \
+  --rule coder \
+  --backend local \
+  --kanban-url http://board \
+  --kanban-token "$BOARD_PASSWORD" \
+  --workdir /workspace
+```
+
 ### Parameters
 
 | Flag | Req. | Description |
@@ -46,8 +66,11 @@ docker run -d \
 | `--profile` | no | personality profile (predefined name or `.yaml` path). If omitted, uses the rule's default personality |
 | `--model` | yes | model in `provider/model` format |
 | `--fallback-model` | no | fallback model used **only in the current iteration** when the primary returns rate limit/quota (429). Without a fallback, the agent goes back to sleep and reprocesses on the next window |
-| `--repo` | yes | `owner/repo` repository |
-| `--project` | yes | Project V2 number |
+| `--backend` | no | board backend: `github` (default) or `local` |
+| `--repo` | github | `owner/repo` repository |
+| `--project` | github | Project V2 number |
+| `--kanban-url` | local | board base URL (e.g. `http://board`) |
+| `--kanban-token` | local | board bearer token (the board password) |
 | `--workdir` | yes | working directory (mounted) |
 | `--env` | no | `KEY=VALUE` exported to the process. Repeatable (alternative to `-e`) |
 | `--interval` | no | seconds between scans when the queue is empty (default `300`) |
@@ -55,11 +78,31 @@ docker run -d \
 | `--rules-dir` | no | predefined rules directory (default `/app/rules`) |
 | `--profiles-dir` | no | predefined profiles directory (default `/app/profiles`) |
 
-> `GH_TOKEN` is required (`gh` reads it from `GH_TOKEN`/`GITHUB_TOKEN`). Provider
-> keys (e.g. `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) are read by opencode from
-> the environment.
+> `GH_TOKEN` is required by the `github` backend (`gh` reads it from
+> `GH_TOKEN`/`GITHUB_TOKEN`). Provider keys (e.g. `DEEPSEEK_API_KEY`,
+> `ANTHROPIC_API_KEY`) are read by opencode from the environment.
 
-## Rate limit and cache
+## Backends
+
+The transport is chosen by `--backend` (env `AW_BACKEND`) and lives under
+`src/backends/`:
+
+- **`github`** (default) — GitHub Projects V2 via the `gh` CLI, with a board
+  cache and rate-limit handling. Needs `AW_OWNER`/`AW_REPO`/`AW_PROJECT`
+  (`--repo`/`--project`).
+- **`local`** — the self-hosted [multi-agent](https://github.com/phprise-foundation/multi-agent)
+  board REST API, using the standard library only (`urllib`). Needs
+  `AW_KANBAN_URL`/`AW_KANBAN_TOKEN` (`--kanban-url`/`--kanban-token`). The board
+  password is used as the bearer token; items are addressed by their board `id`.
+
+Both expose the same primitives (`items`, `set_field`, `clear_field`, `comment`,
+`close`, `create`) and the same internal item shape, so the loop, the agent
+prompt and the `kanban` CLI are backend-agnostic. `<n>` in the `kanban` commands
+is the GitHub issue `number` or the board item `id`, depending on the backend.
+
+### Rate limit and cache
+
+*(`github` backend only.)*
 
 The loop handles GitHub errors without stopping the agent: on rate limit
 (`429`/`secondary rate limit`) it does exponential *backoff* (up to 3600s) and
@@ -203,7 +246,8 @@ Korean; and so on.
 
 ## Expected board
 
-The Project V2 must have these fields:
+Both backends share the same logical model. The GitHub Project V2 must have
+these fields (the self-hosted board exposes the same fields through its API):
 
 - `Status` (single-select): `intent → feasibility → design → plan → qa-refinement → coding → reviewing → testing → done` (linear flow; items **do not go back** — a fix creates a new issue).
 - `Blocked` (single-select, option `blocked`): boolean flag independent of status.
@@ -232,4 +276,20 @@ export GH_TOKEN=... AW_OWNER=... AW_REPO=... AW_PROJECT=...
 python3 src/cli.py --name Davi --rule tech-lead \
   --model deepseek/deepseek-v4-pro --fallback-model deepseek/deepseek-v4-flash \
   --repo OWNER/REPO --project 1 --workdir .
+```
+
+Against a self-hosted board:
+
+```bash
+export AW_BACKEND=local AW_KANBAN_URL=http://localhost:8080 AW_KANBAN_TOKEN=...
+python3 src/cli.py --name Davi --rule coder \
+  --model deepseek/deepseek-v4-pro \
+  --backend local --kanban-url "$AW_KANBAN_URL" --kanban-token "$AW_KANBAN_TOKEN" \
+  --workdir .
+```
+
+Run the tests (standard library only, no extra dependencies):
+
+```bash
+python3 -m unittest discover -s tests -v
 ```

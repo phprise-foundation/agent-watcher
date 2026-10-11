@@ -1,299 +1,51 @@
 #!/usr/bin/env python3
-"""kanban — board helper (GitHub Projects V2) for the agents.
+"""kanban — board helper used by both the loop and the opencode agents.
 
-Reads configuration from the environment:
-  AW_OWNER    org/user login that owns the project (e.g. phprise-foundation)
-  AW_REPO     repository as owner/repo (e.g. phprise-foundation/koenma-id)
-  AW_PROJECT  Project V2 number (e.g. 1)
-
-Expected board fields:
-  Status   (single-select): intent -> feasibility -> design -> plan -> qa-refinement -> coding -> reviewing -> testing -> done
-  Blocked  (single-select): option "blocked" set = blocked, empty = free
-  Role     (single-select): product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder
-  Worker   (text): name of the agent currently working on the item
-
-The flow is linear (items do NOT move backwards); a fix creates a new issue.
+The transport is chosen by AW_BACKEND (github | local) and implemented under
+backends/. This module holds the board-agnostic logic and the CLI. The flow is
+linear (items do NOT move backwards); a fix creates a new item.
 """
 import argparse
 import json
-import os
 import re
-import subprocess
 import sys
-import time
 
-def owner():
-    return os.environ.get("AW_OWNER", "")
-
-
-def project():
-    return os.environ.get("AW_PROJECT", "")
-
-
-def repo():
-    return os.environ.get("AW_REPO", "")
-
+import backends
 
 STATUSES = ["intent", "feasibility", "design", "plan", "qa-refinement", "coding", "reviewing", "testing", "done"]
 ACTIVE = ["feasibility", "design", "plan", "qa-refinement", "coding", "reviewing", "testing"]
 BLOCKED_OPTION = "blocked"
 
+KanbanError = backends.KanbanError
+RateLimitError = backends.RateLimitError
 
-def run(args):
-    return subprocess.run(args, capture_output=True, text=True)
-
-
-class KanbanError(Exception):
-    pass
+_backend = None
 
 
-class RateLimitError(KanbanError):
-    pass
-
-
-# "unknown owner type" is what `gh project` returns when owner resolution
-# fails due to a GraphQL rate limit (the user/org query comes back with an error).
-_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate limit", "abuse", "429",
-                       "unknown owner type")
-
-
-def _rate_limited(result):
-    text = f"{result.stderr or ''} {result.stdout or ''}".lower()
-    return any(m in text for m in _RATE_LIMIT_MARKERS)
-
-
-def gh(args):
-    """Run a `gh` command and turn failure into an exception (distinguishing rate limit)."""
-    r = run(args)
-    if r.returncode != 0:
-        err = (r.stderr or r.stdout or "").strip()
-        if _rate_limited(r):
-            raise RateLimitError(err or "GitHub rate limit reached")
-        raise KanbanError(err or f"failed to run {args[0]}")
-    return r
-
-
-def fail(msg):
-    raise KanbanError(msg)
-
-
-CACHE_VERSION = 2
-LOCK_MAX_AGE = 120
-
-
-def _cache_ttl():
-    """Cache TTL in seconds (configurable via AW_CACHE_TTL)."""
-    try:
-        return max(5, int(os.environ.get("AW_CACHE_TTL", "60")))
-    except ValueError:
-        return 60
-
-
-def _cache_path():
-    base = os.environ.get("AW_WORKDIR") or os.getcwd()
-    return os.path.join(base, f".agent-watcher-cache-{project()}.json")
-
-
-def _lock_path():
-    return _cache_path() + ".lock"
-
-
-def _cache_read(max_age):
-    try:
-        with open(_cache_path()) as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if data.get("version") != CACHE_VERSION:
-        return None
-    if max_age is not None and time.time() - data.get("ts", 0) > max_age:
-        return None
-    return data.get("items")
-
-
-def _cache_store(items):
-    path = _cache_path()
-    tmp = f"{path}.{os.getpid()}.tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump({"version": CACHE_VERSION, "ts": time.time(), "items": items},
-                      f, ensure_ascii=False)
-        os.replace(tmp, path)
-    except OSError:
-        pass
-
-
-def invalidate_cache():
-    try:
-        os.remove(_cache_path())
-    except OSError:
-        pass
-
-
-def _acquire_lock():
-    """Try to acquire the fetch lock — only one agent re-runs the query at a time."""
-    path = _lock_path()
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return True
-    except FileExistsError:
-        try:
-            age = time.time() - os.path.getmtime(path)
-        except OSError:
-            age = 0
-        if age > LOCK_MAX_AGE:
-            try:
-                os.remove(path)
-            except OSError:
-                return False
-            return _acquire_lock()
-        return False
-
-
-def _release_lock():
-    try:
-        os.remove(_lock_path())
-    except OSError:
-        pass
-
-
-def require_config():
-    if not owner() or not project() or not repo():
-        fail("missing config: set AW_OWNER, AW_REPO and AW_PROJECT")
+def _board():
+    global _backend
+    if _backend is None:
+        _backend = backends.load()
+    return _backend
 
 
 def items():
-    require_config()
-    cached = _cache_read(_cache_ttl())
-    if cached is not None:
-        return cached
-    if _acquire_lock():
-        try:
-            return _fetch_and_store()
-        finally:
-            _release_lock()
-    # another agent is fetching: wait for the cache to appear, then use stale
-    for _ in range(10):
-        time.sleep(0.5)
-        fresh = _cache_read(_cache_ttl())
-        if fresh is not None:
-            return fresh
-    stale = _cache_read(None)
-    if stale is not None:
-        return stale
-    return _fetch_and_store()
+    return _board().items()
 
 
-_BOARD_QUERY = """
-query($login: String!, $number: Int!) {
-  organization(login: $login) { projectV2(number: $number) { ...Board } }
-  user(login: $login) { projectV2(number: $number) { ...Board } }
-}
-fragment Board on ProjectV2 {
-  items(first: 200) {
-    nodes {
-      fieldValues(first: 20) {
-        nodes {
-          ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2Field { name } } }
-          ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2Field { name } } }
-        }
-      }
-      content {
-        ... on Issue {
-          number
-          title
-          url
-          comments(last: 50) {
-            nodes { body createdAt author { login } }
-          }
-        }
-      }
-    }
-  }
-}
-"""
+def set_field(number, field, value):
+    _board().set_field(number, field, value)
 
 
-def _fetch_board():
-    """Fetch the whole board (items + comments) in a single GraphQL query."""
-    r = gh(["gh", "api", "graphql",
-            "-f", f"query={_BOARD_QUERY}",
-            "-f", f"login={owner()}",
-            "-F", f"number={int(project())}"])
-    return _parse_board(json.loads(r.stdout))
-
-
-def _parse_board(data):
-    d = data.get("data") or {}
-    project = None
-    for key in ("organization", "user"):
-        node = d.get(key)
-        if node and node.get("projectV2"):
-            project = node["projectV2"]
-            break
-    if project is None:
-        raise KanbanError("project not found (invalid owner/project?)")
-    out = []
-    for it in ((project.get("items") or {}).get("nodes")) or []:
-        content = it.get("content") or {}
-        number = content.get("number")
-        if number is None:
-            continue
-        fields = {}
-        for fv in ((it.get("fieldValues") or {}).get("nodes")) or []:
-            field = ((fv.get("field") or {}).get("name")) or ""
-            if not field:
-                continue
-            if "name" in fv:
-                fields[field] = fv.get("name") or ""
-            elif "text" in fv:
-                fields[field] = fv.get("text") or ""
-        comments = []
-        for c in (((content.get("comments") or {}).get("nodes")) or []):
-            comments.append({
-                "body": c.get("body") or "",
-                "author": ((c.get("author") or {}).get("login")) or "",
-                "created_at": c.get("createdAt") or "",
-            })
-        comments.sort(key=lambda x: x["created_at"])
-        out.append({
-            "number": number,
-            "url": content.get("url") or "",
-            "title": content.get("title") or "",
-            "status": fields.get("Status", ""),
-            "blocked": fields.get("Blocked", "") == BLOCKED_OPTION,
-            "blocked_by": fields.get("BlockedBy", ""),
-            "role": fields.get("Role", ""),
-            "worker": fields.get("Worker", ""),
-            "comments": comments,
-        })
-    return out
-
-
-def _fetch_and_store():
-    try:
-        out = _fetch_board()
-    except KanbanError:
-        stale = _cache_read(None)
-        if stale is not None:
-            return stale
-        raise
-    _cache_store(out)
-    return out
+def clear_field(number, field):
+    _board().clear_field(number, field)
 
 
 def sort_key(it):
     m = re.search(r"RFC-(\d+(?:-\d+)*)", it["title"] or "")
-    nums = tuple(int(x) for x in m.group(1).split("-")) if m else (999999,)
-    return nums
-
-
-def issue_url(number):
-    if str(number).startswith("http"):
-        return number
-    return f"https://github.com/{repo()}/issues/{number}"
+    if m:
+        return tuple(int(x) for x in m.group(1).split("-"))
+    return (999999, int(it.get("number") or 0))
 
 
 def unresponded_mentions(name):
@@ -395,7 +147,7 @@ def cmd_next(args):
 def cmd_get(args):
     rows = [r for r in items() if str(r["number"]) == str(args.number)]
     if not rows:
-        fail(f"no item for issue #{args.number}")
+        raise KanbanError(f"no item for issue #{args.number}")
     print(json.dumps(rows[0], ensure_ascii=False))
 
 
@@ -414,22 +166,6 @@ def cmd_busy(args):
             print("busy")
             return
     print("idle")
-
-
-def set_field(number, field, value):
-    if not value:
-        return
-    url = issue_url(number)
-    gh(["gh", "project", "item-edit", str(project()), "--owner", owner(),
-        "--url", url, "--field", field, "--value", value])
-    invalidate_cache()
-
-
-def clear_field(number, field):
-    url = issue_url(number)
-    gh(["gh", "project", "item-edit", str(project()), "--owner", owner(),
-        "--url", url, "--field", field, "--clear"])
-    invalidate_cache()
 
 
 def cmd_set(args):
@@ -456,39 +192,23 @@ def cmd_clear(args):
 
 
 def cmd_comment(args):
-    url = issue_url(args.number)
     body = args.text
     if args.body_file:
         with open(args.body_file) as f:
             body = f.read()
-    gh(["gh", "issue", "comment", url, "--body", body])
+    _board().comment(args.number, body)
 
 
 def cmd_close(args):
-    url = issue_url(args.number)
-    cmd = ["gh", "issue", "close", url, "--reason", args.reason]
-    if args.comment:
-        cmd += ["--comment", args.comment]
-    gh(cmd)
+    _board().close(args.number, args.comment, args.reason)
 
 
 def cmd_create(args):
-    require_config()
     body = ""
     if args.body_file:
         with open(args.body_file) as f:
             body = f.read()
-    r = gh(["gh", "api", f"repos/{repo()}/issues",
-            "-f", f"title={args.title}", "-f", f"body={body}"])
-    data = json.loads(r.stdout)
-    number = data["number"]
-    url = data["html_url"]
-    gh(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
-    set_field(number, "Status", args.status or "intent")
-    set_field(number, "Role", args.role)
-    if args.blocked_by:
-        set_field(number, "Blocked", BLOCKED_OPTION)
-        set_field(number, "BlockedBy", args.blocked_by)
+    number = _board().create(args.title, body, args.status, args.role, args.blocked_by)
     print(number)
 
 
