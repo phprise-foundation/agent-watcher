@@ -9,6 +9,7 @@ WORKDIR /app
 
 COPY src/ /app/src/
 COPY rules/ /app/rules/
+COPY profiles/ /app/profiles/
 COPY bin/agent-watcher /usr/local/bin/agent-watcher
 COPY bin/kanban /usr/local/bin/kanban
 
@@ -16,5 +17,6 @@ RUN chmod +x /usr/local/bin/agent-watcher /usr/local/bin/kanban
 
 ENV PYTHONPATH=/app
 ENV AW_RULES_DIR=/app/rules
+ENV AW_PROFILES_DIR=/app/profiles
 
 ENTRYPOINT ["agent-watcher"]

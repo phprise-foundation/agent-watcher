@@ -7,9 +7,9 @@ Lê a configuração do ambiente:
   AW_PROJECT  número do Project V2 (ex.: 1)
 
 Campos do quadro esperados:
-  Status   (single-select): to-do -> qa-refinement -> coding -> reviewing -> testing -> done
+  Status   (single-select): intent -> feasibility -> design -> plan -> qa-refinement -> coding -> reviewing -> testing -> done
   Blocked  (single-select): opção "blocked" setada = bloqueado, vazia = livre
-  Role     (single-select): product-owner | tech-lead | qa | coder
+  Role     (single-select): product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder
   Worker   (single-select): nome do agente que está trabalhando
 
 O fluxo é linear (itens NÃO voltam); correção gera uma nova issue.
@@ -34,8 +34,8 @@ def repo():
     return os.environ.get("AW_REPO", "")
 
 
-STATUSES = ["to-do", "qa-refinement", "coding", "reviewing", "testing", "done"]
-ACTIVE = ["qa-refinement", "coding", "reviewing", "testing"]
+STATUSES = ["intent", "feasibility", "design", "plan", "qa-refinement", "coding", "reviewing", "testing", "done"]
+ACTIVE = ["feasibility", "design", "plan", "qa-refinement", "coding", "reviewing", "testing"]
 BLOCKED_OPTION = "blocked"
 
 
@@ -307,6 +307,14 @@ def cmd_comment(args):
     gh(["gh", "issue", "comment", url, "--body", body])
 
 
+def cmd_close(args):
+    url = issue_url(args.number)
+    cmd = ["gh", "issue", "close", url, "--reason", args.reason]
+    if args.comment:
+        cmd += ["--comment", args.comment]
+    gh(cmd)
+
+
 def cmd_create(args):
     require_config()
     body = ""
@@ -319,7 +327,7 @@ def cmd_create(args):
     number = data["number"]
     url = data["html_url"]
     gh(["gh", "project", "item-add", str(project()), "--owner", owner(), "--url", url])
-    set_field(number, "Status", args.status or "to-do")
+    set_field(number, "Status", args.status or "intent")
     set_field(number, "Role", args.role)
     if args.blocked_by:
         set_field(number, "Blocked", BLOCKED_OPTION)
@@ -372,6 +380,12 @@ def main():
     p.add_argument("--text")
     p.add_argument("--body-file")
     p.set_defaults(func=cmd_comment)
+
+    p = sub.add_parser("close")
+    p.add_argument("number")
+    p.add_argument("--comment")
+    p.add_argument("--reason", default="not planned")
+    p.set_defaults(func=cmd_close)
 
     p = sub.add_parser("clear")
     p.add_argument("number")

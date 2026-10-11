@@ -4,6 +4,7 @@ import os
 import sys
 
 import kanban
+import profiles
 import rules
 import watcher
 
@@ -33,6 +34,10 @@ def main(argv=None):
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE. Repetível.")
     ap.add_argument("--rules-dir", default=os.environ.get("AW_RULES_DIR", "/app/rules"),
                     help="diretório das regras predefinidas (default: /app/rules)")
+    ap.add_argument("--profile", default=None,
+                    help="perfil de personalidade (nome predefinido ou caminho .yaml). Se omitido, usa a personalidade padrão da rule")
+    ap.add_argument("--profiles-dir", default=os.environ.get("AW_PROFILES_DIR", "/app/profiles"),
+                    help="diretório dos perfis predefinidos (default: /app/profiles)")
     ap.add_argument("--interval", type=int, default=300,
                     help="segundos entre varreduras quando a fila está vazia (default 300)")
     ap.add_argument("--short-interval", type=int, default=30,
@@ -48,6 +53,7 @@ def main(argv=None):
     os.environ["AW_REPO"] = args.repo
     os.environ["AW_PROJECT"] = str(args.project)
     os.environ["AW_RULES_DIR"] = args.rules_dir
+    os.environ["AW_PROFILES_DIR"] = args.profiles_dir
     os.environ["AW_WORKDIR"] = args.workdir
 
     if not os.path.isdir(args.workdir):
@@ -57,6 +63,10 @@ def main(argv=None):
     if not loaded:
         raise SystemExit("nenhuma regra carregada")
 
+    profile_personality = None
+    if args.profile:
+        profile_personality = profiles.render(profiles.load_profile(args.profile))
+
     config = {
         "name": args.name,
         "model": args.model,
@@ -65,6 +75,7 @@ def main(argv=None):
         "project": str(args.project),
         "workdir": args.workdir,
         "rules": loaded,
+        "profile_personality": profile_personality,
         "interval": args.interval,
         "short_interval": args.short_interval,
     }

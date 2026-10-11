@@ -28,7 +28,8 @@ docker run -d \
   -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   esdrasschonevald/agent-watcher \
   --name Davi \
-  --rule tech-lead.md \
+  --rule tech-lead \
+  --profile estrategista_socratico \
   --model deepseek/deepseek-v4-pro \
   --fallback-model deepseek/deepseek-v4-flash \
   --repo phprise-foundation/koenma-id \
@@ -41,7 +42,8 @@ docker run -d \
 | Flag | Obrig. | Descrição |
 |---|---|---|
 | `--name` | sim | identidade do agente (assina comentários e o campo `Worker`) |
-| `--rule` | sim | regra (predefinida ou caminho). Repetível. |
+| `--rule` | sim | regra (predefinida ou caminho), **sem** a extensão `.md`. Repetível. |
+| `--profile` | não | perfil de personalidade (nome predefinido ou caminho `.yaml`). Se omitido, usa a personalidade padrão da rule |
 | `--model` | sim | modelo no formato `provider/model` |
 | `--fallback-model` | não | modelo alternativo usado **apenas na iteração atual** quando o principal retorna rate limit/quota (429). Sem fallback, o agente volta a dormir e reprocessa na próxima janela |
 | `--repo` | sim | repositório `owner/repo` |
@@ -51,6 +53,7 @@ docker run -d \
 | `--interval` | não | segundos entre varreduras com a fila vazia (default `300`) |
 | `--short-interval` | não | segundos entre tarefas após uma execução (default `30`) |
 | `--rules-dir` | não | diretório das regras predefinidas (default `/app/rules`) |
+| `--profiles-dir` | não | diretório dos perfis predefinidos (default `/app/profiles`) |
 
 > `GH_TOKEN` é obrigatório (o `gh` lê de `GH_TOKEN`/`GITHUB_TOKEN`). As chaves de
 > provider (ex.: `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) são lidas pelo opencode a
@@ -91,20 +94,76 @@ personality: >          # personalidade do agente (pré-definida pelo papel)
 
 | Regra | `statuses` | `role` | `unblock` |
 |---|---|---|---|
-| `solutions-architect.md` | `feasibility` | `solutions-architect` | — |
-| `systems-architect.md` | `design` | `systems-architect` | — |
-| `framework-architect.md` | `plan` | `framework-architect` | — |
-| `tech-lead.md` | `reviewing` | `tech-lead` | sim |
-| `quality-assurance.md` | `qa-refinement`, `testing` | `qa` | — |
-| `coder.md` | `coding` | `coder` | — |
+| `product-owner` | `intent` | `product-owner` | — |
+| `solutions-architect` | `feasibility` | `solutions-architect` | — |
+| `systems-architect` | `design` | `systems-architect` | — |
+| `framework-architect` | `plan` | `framework-architect` | — |
+| `tech-lead` | `reviewing` | `tech-lead` | sim |
+| `quality-assurance` | `qa-refinement`, `testing` | `qa` | — |
+| `coder` | `coding` | `coder` | — |
 
-> O `product-owner` (status `intent`) fica para uma fase futura.
-
-Para usar uma regra customizada, monte o arquivo e passe o caminho:
+Para usar uma regra customizada, monte o arquivo e passe o caminho (com ou sem `.md`):
 
 ```bash
 docker run -d ... -v "$(pwd)/rules:/rules" ... \
-  --rule /rules/meu-cargo.md
+  --rule meu-cargo
+```
+
+## Perfis de personalidade (em `/app/profiles/`)
+
+Perfis são arquivos YAML que descrevem o comportamento/estilo da IA. Quando
+`--profile` é informado, ele substitui a `personality` padrão da rule. Sem
+`--profile`, o agente usa a `personality` definida no frontmatter de cada rule.
+
+| Perfil | Ideia central |
+|---|---|
+| `estrategista_socratico` | desconstruir certezas, causa raiz, imparcialidade (recomendado p/ Product Owner) |
+| `introvertido_metodico_nerd` | raciocínio profundo, listas, processo rigoroso |
+| `critico_detalhista_professor` | mestre exigente que revisa e ensina |
+| `explosivo_dramatico_intuitivo` | energia, urgência e decisão por intuição |
+| `apaixonado_atencioso_galanteador` | calor, cortesia e cuidado com as pessoas |
+| `questionador_inseguro_curioso` | dúvida constante e investigação honesta |
+| `musa_geek_sedutora_gotica` | mistério, charme sombrio e cultura geek |
+| `pacifista_sereno_empatico` | harmonia, consenso e escuta ativa |
+| `jovial_inseguro_militante` | alegria contagiante e fervor por causas |
+
+Estrutura universal de um perfil:
+
+```yaml
+profile_name: ""
+descricao_estilo: ""
+
+atributos_psicologicos:   # escalas 0 a 10
+  entusiasmo: 0
+  formalidade: 0
+  confianca: 0
+  metodismo: 0
+  critica: 0
+  empatia: 0
+  jogo_de_cintura: 0
+
+comunicacao:
+  tom_de_voz: ""
+  palavras_chave: []
+  expressoes_proibidas: []
+  uso_de_emojis: ""       # Nunca, Moderado, Frequente
+
+bagagem_cultural:
+  livros_inspiradores: []
+  referencias_e_pessoas: []
+  hobbies: []
+  musicas_e_ritmos: []
+  arquetipo: ""
+
+diretrizes_de_comportamento: []
+vieses_e_restricoes: []
+```
+
+Para usar um perfil customizado, monte o arquivo e passe o caminho:
+
+```bash
+docker run -d ... -v "$(pwd)/profiles:/profiles" ... \
+  --profile /profiles/meu-perfil.yaml
 ```
 
 ## Menções entre agentes
@@ -144,7 +203,7 @@ docker push esdrasschonevald/agent-watcher:latest
 ```bash
 pip install pyyaml        # (ou apk add py3-yaml)
 export GH_TOKEN=... AW_OWNER=... AW_REPO=... AW_PROJECT=...
-python3 src/cli.py --name Davi --rule tech-lead.md \
+python3 src/cli.py --name Davi --rule tech-lead \
   --model deepseek/deepseek-v4-pro --fallback-model deepseek/deepseek-v4-flash \
   --repo OWNER/REPO --project 1 --workdir .
 ```

@@ -30,7 +30,11 @@ def log(msg):
 def build_prompt(config, number=None, title=None, mention=None):
     name = config["name"]
     rule_bodies = "\n\n".join(r.body for r in config["rules"])
-    personalities = "\n\n".join(r.personality for r in config["rules"] if r.personality)
+    profile = config.get("profile_personality")
+    if profile:
+        personalities = profile
+    else:
+        personalities = "\n\n".join(r.personality for r in config["rules"] if r.personality)
 
     if mention:
         task_section = (
