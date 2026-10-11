@@ -6,6 +6,7 @@ Cada regra é um arquivo markdown:
     statuses: [reviewing]   # colunas do quadro que esta regra consome (ordem = prioridade)
     role: tech-lead         # valor do campo Role que este agente representa
     unblock: true           # opcional: este agente também cuida de itens bloqueados
+    interactive: true       # opcional: responde a novos comentários do usuário em vez de reprocessar
     ---
     # Revisor
     ... instruções ...
@@ -30,6 +31,7 @@ class Rule:
     statuses: list
     role: str
     unblock: bool
+    interactive: bool
     personality: str
     body: str
 
@@ -71,6 +73,7 @@ def load_rule(ref: str) -> Rule:
         statuses=statuses,
         role=meta.get("role") or "",
         unblock=bool(meta.get("unblock", False)),
+        interactive=bool(meta.get("interactive", False)),
         personality=meta.get("personality") or "",
         body=body,
     )

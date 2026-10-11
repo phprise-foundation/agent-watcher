@@ -29,7 +29,7 @@ docker run -d \
   esdrasschonevald/agent-watcher \
   --name Davi \
   --rule tech-lead \
-  --profile estrategista_socratico \
+  --profile socratic \
   --model deepseek/deepseek-v4-pro \
   --fallback-model deepseek/deepseek-v4-flash \
   --repo phprise-foundation/koenma-id \
@@ -83,6 +83,7 @@ markdown com frontmatter:
 statuses: [reviewing]   # colunas que esta regra consome (ordem = prioridade)
 role: tech-lead         # valor do campo Role
 unblock: true           # opcional: este agente também cuida de itens bloqueados
+interactive: true       # opcional: age sobre novos comentários do usuário (não reprocessa o já respondido)
 personality: >          # personalidade do agente (pré-definida pelo papel)
   Atencioso e detalhista...
 ---
@@ -117,15 +118,15 @@ Perfis são arquivos YAML que descrevem o comportamento/estilo da IA. Quando
 
 | Perfil | Ideia central |
 |---|---|
-| `estrategista_socratico` | desconstruir certezas, causa raiz, imparcialidade (recomendado p/ Product Owner) |
-| `introvertido_metodico_nerd` | raciocínio profundo, listas, processo rigoroso |
-| `critico_detalhista_professor` | mestre exigente que revisa e ensina |
-| `explosivo_dramatico_intuitivo` | energia, urgência e decisão por intuição |
-| `apaixonado_atencioso_galanteador` | calor, cortesia e cuidado com as pessoas |
-| `questionador_inseguro_curioso` | dúvida constante e investigação honesta |
-| `musa_geek_sedutora_gotica` | mistério, charme sombrio e cultura geek |
-| `pacifista_sereno_empatico` | harmonia, consenso e escuta ativa |
-| `jovial_inseguro_militante` | alegria contagiante e fervor por causas |
+| `socratic` | desconstruir certezas, causa raiz, imparcialidade (recomendado p/ Product Owner) |
+| `nerd` | raciocínio profundo, listas, processo rigoroso |
+| `professor` | mestre exigente que revisa e ensina |
+| `firebrand` | energia, urgência e decisão por intuição |
+| `gallant` | calor, cortesia e cuidado com as pessoas |
+| `skeptic` | dúvida constante e investigação honesta |
+| `goth` | mistério, charme sombrio e cultura geek |
+| `pacifist` | harmonia, consenso e escuta ativa |
+| `activist` | alegria contagiante e fervor por causas |
 
 Estrutura universal de um perfil:
 
@@ -174,6 +175,20 @@ acionar um agente, escreva `@NomeDoAgente` no comentário (o mesmo valor de
 foram respondidas (não há comentário posterior assinado com `Nome: `) e responde.
 
 Os agentes sempre assinam seus comentários com `Nome: ` no início.
+
+## Evitando acionamentos repetidos (ralo de tokens)
+
+Uma menção `@Nome` só é tratada como pendente se **não** houver um comentário
+posterior assinado com `Nome: `. Ou seja: assim que o agente responde, a menção
+fica "resolvida" e não volta a acionar o agente nas varreduras seguintes — sem
+precisar editar/desmarcar o comentário.
+
+Para papéis que **ficam no mesmo status** durante uma conversa (ex.: o
+Product Owner em `intent`, conversando com o cliente antes de criar a RFC), use
+`interactive: true` no frontmatter da rule. Nesse modo o agente só processa um
+item quando há atividade nova do usuário (item sem comentários ou último
+comentário não assinado por ele), evitando reprocessar a mesma issue a cada
+ciclo.
 
 ## Quadro esperado
 

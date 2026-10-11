@@ -203,6 +203,42 @@ def next_mention(name):
     return rows[0] if rows else None
 
 
+def unresponded_comments(name, statuses):
+    """Itens (nos `statuses`) com atividade do usuário ainda não respondida pelo agente.
+
+    Um item é acionável quando:
+      - não tem comentários (necessidade nova no backlog), ou
+      - o último comentário NÃO foi assinado pelo agente (`name: `), ou seja, há
+        uma resposta nova do usuário aguardando análise.
+
+    Isso evita reprocessar a mesma issue a cada varredura (ralo de tokens), sem
+    precisar editar/desmarcar comentários.
+    """
+    sig = f"{name}:"
+    out = []
+    for it in items():
+        if it["status"] not in statuses:
+            continue
+        if it["status"] == "done" or it["worker"]:
+            continue
+        comments = issue_comments(it["number"])
+        last = comments[-1]["body"] if comments else ""
+        if not comments or sig not in last:
+            out.append({
+                "number": it["number"],
+                "title": it["title"],
+                "status": it["status"],
+                "mention": last[:500],
+            })
+    out.sort(key=sort_key)
+    return out
+
+
+def next_comment(name, statuses):
+    rows = unresponded_comments(name, statuses)
+    return rows[0] if rows else None
+
+
 def cmd_list(args):
     rows = items()
     if args.role:

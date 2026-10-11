@@ -16,7 +16,7 @@ Um perfil é um arquivo YAML que descreve o comportamento da IA:
     vieses_e_restricoes: []
 
 A referência passada em `--profile` pode ser:
-  - um nome predefinido (ex.: "estrategista_socratico" -> <profiles_dir>/estrategista_socratico.yaml)
+  - um nome predefinido (ex.: "socratic" -> <profiles_dir>/socratic.yaml)
   - um caminho montado no container (ex.: "/profiles/meu-perfil.yaml")
 """
 import os

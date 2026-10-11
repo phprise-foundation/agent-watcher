@@ -157,12 +157,14 @@ def loop(config):
     name = config["name"]
     statuses = rules.combined_statuses(config["rules"])
     unblock = any(r.unblock for r in config["rules"])
+    interactive = any(r.interactive for r in config["rules"])
     interval = config["interval"]
     short = config.get("short_interval", 30)
     max_backoff = config.get("max_backoff", 3600)
     mention_interval = config.get("mention_interval", interval)
 
     log(f"iniciado: name={name} statuses={statuses} unblock={unblock} "
+        f"interactive={interactive} "
         f"repo={config['repo']} project={config['project']} model={config['model']}")
 
     backoff = short
@@ -190,7 +192,10 @@ def loop(config):
                     backoff = _after(result, backoff, short, max_backoff)
                     continue
 
-            task = next_task(rows, statuses)
+            if interactive:
+                task = kanban.next_comment(name, statuses)
+            else:
+                task = next_task(rows, statuses)
             if task is None:
                 log(f"fila vazia para {statuses or 'nada'}. dormindo {interval}s")
                 backoff = short
