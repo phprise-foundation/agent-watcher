@@ -51,7 +51,10 @@ class RateLimitError(KanbanError):
     pass
 
 
-_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate limit", "abuse", "429")
+# "unknown owner type" é o que o `gh project` retorna quando a resolução do
+# owner falha por rate limit do GraphQL (a query user/org volta com erro).
+_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate limit", "abuse", "429",
+                       "unknown owner type")
 
 
 def _rate_limited(result):
