@@ -67,11 +67,16 @@ de novo; outros erros apenas logam e o agente volta a dormir. Itens que ficaram
 com o `Worker` do próprio agente após uma interrupção são recuperados no início
 de cada ciclo.
 
-Para reduzir chamadas ao GraphQL, o resultado de `kanban list` é cacheado por
-30s em `.agent-watcher-cache-<project>.json` no workdir (compartilhado entre os
-agentes), e invalidado a cada mutação (`set`/`clear`/`create`). **Adicione esse
-arquivo ao `.gitignore` do repositório montado** para que o agente revisor não o
-commite acidentalmente.
+Para reduzir chamadas à API, o quadro **inteiro** (itens + campos + comentários)
+é buscado numa única query GraphQL e cacheado em
+`.agent-watcher-cache-<project>.json` no workdir (compartilhado entre os agentes).
+Um *lock* garante que, quando o TTL expira, **só um** agente refaz a busca — os
+demais leem o cache (ou o stale). O TTL é configurável via `AW_CACHE_TTL`
+(default **60s**) e o cache é invalidado a cada mutação (`set`/`clear`/`create`).
+
+Em caso de rate limit/falha do GitHub, o agente cai para o **cache stale** e
+continua operando sem nova requisição. **Adicione o arquivo ao `.gitignore` do
+repositório montado** para que o agente revisor não o commite acidentalmente.
 
 ## Regras
 

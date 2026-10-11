@@ -77,7 +77,16 @@ def fail(msg):
     raise KanbanError(msg)
 
 
-CACHE_TTL = 30
+CACHE_VERSION = 2
+LOCK_MAX_AGE = 120
+
+
+def _cache_ttl():
+    """TTL do cache em segundos (configurável via AW_CACHE_TTL)."""
+    try:
+        return max(5, int(os.environ.get("AW_CACHE_TTL", "60")))
+    except ValueError:
+        return 60
 
 
 def _cache_path():
@@ -85,11 +94,17 @@ def _cache_path():
     return os.path.join(base, f".agent-watcher-cache-{project()}.json")
 
 
+def _lock_path():
+    return _cache_path() + ".lock"
+
+
 def _cache_read(max_age):
     try:
         with open(_cache_path()) as f:
             data = json.load(f)
     except (OSError, ValueError):
+        return None
+    if data.get("version") != CACHE_VERSION:
         return None
     if max_age is not None and time.time() - data.get("ts", 0) > max_age:
         return None
@@ -101,7 +116,8 @@ def _cache_store(items):
     tmp = f"{path}.{os.getpid()}.tmp"
     try:
         with open(tmp, "w") as f:
-            json.dump({"ts": time.time(), "items": items}, f, ensure_ascii=False)
+            json.dump({"version": CACHE_VERSION, "ts": time.time(), "items": items},
+                      f, ensure_ascii=False)
         os.replace(tmp, path)
     except OSError:
         pass
@@ -114,6 +130,35 @@ def invalidate_cache():
         pass
 
 
+def _acquire_lock():
+    """Tenta adquirir o lock de fetch — só um agente refaz a query por vez."""
+    path = _lock_path()
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            age = time.time() - os.path.getmtime(path)
+        except OSError:
+            age = 0
+        if age > LOCK_MAX_AGE:
+            try:
+                os.remove(path)
+            except OSError:
+                return False
+            return _acquire_lock()
+        return False
+
+
+def _release_lock():
+    try:
+        os.remove(_lock_path())
+    except OSError:
+        pass
+
+
 def require_config():
     if not owner() or not project() or not repo():
         fail("config ausente: defina AW_OWNER, AW_REPO e AW_PROJECT")
@@ -121,33 +166,120 @@ def require_config():
 
 def items():
     require_config()
-    cached = _cache_read(CACHE_TTL)
+    cached = _cache_read(_cache_ttl())
     if cached is not None:
         return cached
+    if _acquire_lock():
+        try:
+            return _fetch_and_store()
+        finally:
+            _release_lock()
+    # outro agente está buscando: aguarda o cache aparecer, depois usa stale
+    for _ in range(10):
+        time.sleep(0.5)
+        fresh = _cache_read(_cache_ttl())
+        if fresh is not None:
+            return fresh
+    stale = _cache_read(None)
+    if stale is not None:
+        return stale
+    return _fetch_and_store()
+
+
+_BOARD_QUERY = """
+query($login: String!, $number: Int!) {
+  organization(login: $login) { projectV2(number: $number) { ...Board } }
+  user(login: $login) { projectV2(number: $number) { ...Board } }
+}
+fragment Board on ProjectV2 {
+  items(first: 200) {
+    nodes {
+      fieldValues(first: 20) {
+        nodes {
+          ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2Field { name } } }
+          ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2Field { name } } }
+        }
+      }
+      content {
+        ... on Issue {
+          number
+          title
+          url
+          comments(last: 50) {
+            nodes { body createdAt author { login } }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _fetch_board():
+    """Busca o quadro inteiro (itens + comentários) numa única query GraphQL."""
+    r = gh(["gh", "api", "graphql",
+            "-f", f"query={_BOARD_QUERY}",
+            "-f", f"login={owner()}",
+            "-F", f"number={int(project())}"])
+    return _parse_board(json.loads(r.stdout))
+
+
+def _parse_board(data):
+    d = data.get("data") or {}
+    project = None
+    for key in ("organization", "user"):
+        node = d.get(key)
+        if node and node.get("projectV2"):
+            project = node["projectV2"]
+            break
+    if project is None:
+        raise KanbanError("projeto não encontrado (owner/project inválidos?)")
+    out = []
+    for it in ((project.get("items") or {}).get("nodes")) or []:
+        content = it.get("content") or {}
+        number = content.get("number")
+        if number is None:
+            continue
+        fields = {}
+        for fv in ((it.get("fieldValues") or {}).get("nodes")) or []:
+            field = ((fv.get("field") or {}).get("name")) or ""
+            if not field:
+                continue
+            if "name" in fv:
+                fields[field] = fv.get("name") or ""
+            elif "text" in fv:
+                fields[field] = fv.get("text") or ""
+        comments = []
+        for c in (((content.get("comments") or {}).get("nodes")) or []):
+            comments.append({
+                "body": c.get("body") or "",
+                "author": ((c.get("author") or {}).get("login")) or "",
+                "created_at": c.get("createdAt") or "",
+            })
+        comments.sort(key=lambda x: x["created_at"])
+        out.append({
+            "number": number,
+            "url": content.get("url") or "",
+            "title": content.get("title") or "",
+            "status": fields.get("Status", ""),
+            "blocked": fields.get("Blocked", "") == BLOCKED_OPTION,
+            "blocked_by": fields.get("BlockedBy", ""),
+            "role": fields.get("Role", ""),
+            "worker": fields.get("Worker", ""),
+            "comments": comments,
+        })
+    return out
+
+
+def _fetch_and_store():
     try:
-        r = gh(["gh", "project", "item-list", str(project()), "--owner", owner(),
-                "--format", "json", "--limit", "200"])
-    except RateLimitError:
+        out = _fetch_board()
+    except KanbanError:
         stale = _cache_read(None)
         if stale is not None:
             return stale
         raise
-    data = json.loads(r.stdout)
-    out = []
-    for it in data.get("items", []):
-        content = it.get("content") or {}
-        if content.get("type") != "Issue":
-            continue
-        out.append({
-            "number": content.get("number"),
-            "url": content.get("url"),
-            "title": content.get("title"),
-            "status": it.get("status") or "",
-            "blocked": bool(it.get("blocked")),
-            "blocked_by": it.get("blockedBy") or it.get("BlockedBy") or it.get("blocked_by") or "",
-            "role": it.get("role") or "",
-            "worker": it.get("worker") or "",
-        })
     _cache_store(out)
     return out
 
@@ -164,20 +296,6 @@ def issue_url(number):
     return f"https://github.com/{repo()}/issues/{number}"
 
 
-def issue_comments(number):
-    r = gh(["gh", "issue", "view", str(number), "--repo", repo(), "--json", "comments"])
-    data = json.loads(r.stdout)
-    out = []
-    for c in data.get("comments", []):
-        out.append({
-            "body": c.get("body") or "",
-            "author": (c.get("author") or {}).get("login") or "",
-            "created_at": c.get("createdAt") or "",
-        })
-    out.sort(key=lambda c: c["created_at"])
-    return out
-
-
 def unresponded_mentions(name):
     """Itens com menção `@name` ainda sem resposta subsequente do agente."""
     marker = f"@{name}"
@@ -186,7 +304,7 @@ def unresponded_mentions(name):
     for it in items():
         if it["status"] == "done" or it["worker"]:
             continue
-        comments = issue_comments(it["number"])
+        comments = it.get("comments") or []
         for i, c in enumerate(comments):
             if marker in c["body"]:
                 answered = any(sig in d["body"] for d in comments[i + 1:])
@@ -224,7 +342,7 @@ def unresponded_comments(name, statuses):
             continue
         if it["status"] == "done" or it["worker"]:
             continue
-        comments = issue_comments(it["number"])
+        comments = it.get("comments") or []
         last = comments[-1]["body"] if comments else ""
         if not comments or sig not in last:
             out.append({
