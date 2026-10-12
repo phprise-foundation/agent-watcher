@@ -1,0 +1,8 @@
+#!/bin/sh
+# chat-server entrypoint (inside the container it points to /app/src).
+if [ -d /app/src ]; then
+    exec python3 /app/src/chat_server.py "$@"
+else
+    DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    exec python3 "$DIR/src/chat_server.py" "$@"
+fi
