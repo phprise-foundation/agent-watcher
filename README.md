@@ -255,6 +255,23 @@ these fields (the self-hosted board exposes the same fields through its API):
 - `Role` (single-select): `product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder`.
 - `Worker` (**text**): name of the agent currently running. Must be text (not single-select) so the name is free — each person chooses the `--name` when starting the agent.
 
+## Chat service
+
+`bin/chat-server` starts a small HTTP service that answers board-copilot
+questions with opencode, **read-only**. It backs the multi-agent Copilot panel
+(the board's `ChatAgent` contract).
+
+```bash
+export AW_CHAT_TOKEN=... AW_BACKEND=local AW_KANBAN_URL=http://board \
+       AW_KANBAN_TOKEN=... AW_MODEL=deepseek/deepseek-v4-pro AW_WORKDIR=/workspace
+chat-server            # listens on :8080 (override with AW_CHAT_PORT)
+```
+
+- `GET /health` → `{"ok": true}`
+- `POST /reply` (bearer `AW_CHAT_TOKEN`) with `{"messages":[{"role","body"}]}` → `{"reply":"..."}`
+
+The service reads the board through the `kanban` helper and never mutates it.
+
 ## Building the image
 
 ```bash
