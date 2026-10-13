@@ -43,6 +43,8 @@ def main(argv=None):
     ap.add_argument("--name", required=True, help="agent identity (signs comments/Worker)")
     ap.add_argument("--rule", action="append", required=True,
                     help="rule (predefined or path). Repeatable.")
+    ap.add_argument("--role", default=None,
+                    help="workflow role owned by this agent (local backend; defaults to the rule's role)")
     ap.add_argument("--model", required=True, help="model in provider/model format")
     ap.add_argument("--fallback-model", default=None,
                     help="fallback model (provider/model) used only in the current iteration on rate limit (429/quota)")
@@ -88,12 +90,15 @@ def main(argv=None):
     if not loaded:
         raise SystemExit("no rule loaded")
 
+    role = args.role or next((r.role for r in loaded if r.role), "")
+
     profile_personality = None
     if args.profile:
         profile_personality = profiles.render(profiles.load_profile(args.profile))
 
     config = {
         "name": args.name,
+        "role": role,
         "backend": args.backend,
         "model": args.model,
         "fallback_model": args.fallback_model,

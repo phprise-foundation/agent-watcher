@@ -142,6 +142,56 @@ class LocalBackendTest(unittest.TestCase):
         self.assertEqual(self.body(self.requests[1]), {"blocked": True})
         self.assertEqual(self.body(self.requests[2]), {"blocked_by": "RFC-1"})
 
+    def test_workflow_maps_columns(self):
+        self.respond({"board": {
+            "name": "Multi-Agent",
+            "columns": [
+                {"id": "intent", "name": "Intent", "position": 0, "final": False,
+                 "role": "product-owner", "transitions": ["feasibility"]},
+                {"id": "done", "name": "Done", "position": 1, "final": True,
+                 "role": None, "transitions": []},
+            ],
+        }})
+
+        data = local.workflow()
+
+        self.assertEqual(data["name"], "Multi-Agent")
+        self.assertEqual(data["columns"][0]["role"], "product-owner")
+        self.assertEqual(data["columns"][0]["transitions"], ["feasibility"])
+        self.assertEqual(data["columns"][1]["role"], "")
+        self.assertTrue(data["columns"][1]["final"])
+        self.assertEqual(self.requests[0].full_url, "http://board/api/board")
+
+    def test_advance_posts_target(self):
+        self.respond({"item": {}})
+
+        local.advance(5, "feasibility")
+
+        request = self.requests[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.full_url, "http://board/api/items/5/advance")
+        self.assertEqual(self.body(request), {"to": "feasibility"})
+
+    def test_advance_without_target_sends_empty_body(self):
+        self.respond({"item": {}})
+
+        local.advance(5)
+
+        self.assertEqual(self.body(self.requests[0]), {})
+
+    def test_agents_maps_spec(self):
+        self.respond({"agents": [{
+            "id": "coder", "name": "Coder", "active": True, "rule": "coder",
+            "profile": "skeptic", "model": "deepseek/deepseek-flash",
+            "fallback_model": "", "interval": 120, "workspace": "/workspace",
+        }]})
+
+        rows = local.agents()
+
+        self.assertEqual(rows[0]["id"], "coder")
+        self.assertEqual(rows[0]["interval"], 120)
+        self.assertEqual(rows[0]["profile"], "skeptic")
+
     def test_missing_url_raises(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(KanbanError):

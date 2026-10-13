@@ -15,7 +15,7 @@ write production code nor unit tests of internal classes.
 - Read the issue and the input/output contracts.
 - Create the BDD scenarios (`.feature`) and the integration test skeletons (they
   must fail in the Red phase).
-- When done: `kanban set <n> --status coding --role coder` and `kanban clear <n> --field Worker`.
+- When done: `kanban advance <n>` and `kanban clear <n> --field Worker`.
 
 ## Final tests (Status: testing)
 

@@ -39,6 +39,44 @@ def read_hint(config, number):
     return f"gh issue view {number} --repo {config['repo']} --comments"
 
 
+def workflow_text(workflow):
+    lines = ["Board workflow (columns in order; role = stage owner; -> = allowed next):"]
+    for column in workflow.get("columns", []):
+        role = column.get("role") or "-"
+        transitions = ", ".join(column.get("transitions") or []) or "-"
+        final = " (final)" if column.get("final") else ""
+        lines.append(f"- {column.get('id')} ({column.get('name')}){final}: role={role} -> {transitions}")
+    return "\n".join(lines)
+
+
+def board_help(config):
+    if config.get("workflow"):
+        return (
+            "- Query: kanban list [--status <x>] [--blocked] [--json]\n"
+            "- Read the workflow: kanban workflow\n"
+            "- Advance: kanban advance <n> [--to <column>]\n"
+            "- Pending mentions: kanban mentions <name>\n"
+            "- Change state: kanban set <n> [--role <r>] [--worker <w>] [--blocked|--unblocked] [--blocked-by <task>|--clear-blocked-by]\n"
+            "- Clear field: kanban clear <n> --field Worker\n"
+            "- Comment: kanban comment <n> --text \"...\"\n"
+            "- Create issue: kanban create --title \"...\" --body-file <file.md> [--status <x>] [--role <r>] [--blocked-by <task>]\n\n"
+            + workflow_text(config["workflow"])
+            + "\n\nWhen your stage is done, advance the item with `kanban advance <n>`; use "
+            "`--to` only when more than one transition is allowed. The board assigns "
+            "the destination stage and its role."
+        )
+    return (
+        "- Query: kanban list [--status <x>] [--blocked] [--json]\n"
+        "- Pending mentions: kanban mentions <name>\n"
+        "- Change state: kanban set <n> --status <x> [--role <r>] [--worker <w>] [--blocked|--unblocked] [--blocked-by <task>|--clear-blocked-by]\n"
+        "- Clear field: kanban clear <n> --field Worker\n"
+        "- Comment: kanban comment <n> --text \"...\"\n"
+        "- Create issue: kanban create --title \"...\" --body-file <file.md> [--status <x>] [--role <r>] [--blocked-by <task>]\n\n"
+        "Valid statuses (linear flow, items do NOT go backwards; a fix creates a new issue):\n"
+        + STATUSES_HELP
+    )
+
+
 def build_prompt(config, number=None, title=None, mention=None):
     name = config["name"]
     rule_bodies = "\n\n".join(r.body for r in config["rules"])
@@ -84,15 +122,7 @@ def build_prompt(config, number=None, title=None, mention=None):
 
 # Interacting with the board (helper `kanban`)
 
-- Query: kanban list [--status <x>] [--blocked] [--json]
-- Pending mentions: kanban mentions <name>
-- Change state: kanban set <n> --status <x> [--role <r>] [--worker <w>] [--blocked|--unblocked] [--blocked-by <task>|--clear-blocked-by]
-- Clear field: kanban clear <n> --field Worker
-- Comment: kanban comment <n> --text "..."
-- Create issue: kanban create --title "..." --body-file <file.md> [--status <x>] [--role <r>] [--blocked-by <task>]
-
-Valid statuses (linear flow, items do NOT go backwards; a fix creates a new issue):
-{STATUSES_HELP}
+{board_help(config)}
 
 # Current task
 
@@ -169,6 +199,17 @@ def _after(result, backoff, short, max_backoff):
 def loop(config):
     name = config["name"]
     statuses = rules.combined_statuses(config["rules"])
+    role = config.get("role")
+    if config.get("backend") == "local":
+        try:
+            workflow = kanban.workflow()
+        except kanban.KanbanError:
+            workflow = None
+        if workflow:
+            config["workflow"] = workflow
+            derived = kanban.statuses_for_role(role, workflow) if role else []
+            if derived:
+                statuses = derived
     unblock = any(r.unblock for r in config["rules"])
     interactive = any(r.interactive for r in config["rules"])
     interval = config["interval"]

@@ -47,7 +47,7 @@ for the pipeline.
    acceptance criteria and out-of-scope (use `gh issue edit` or comment the final
    version for the record).
 2. Advance the RFC into the pipeline:
-   `kanban set <n> --status feasibility --role solutions-architect`.
+   `kanban advance <n>`.
 3. Clear the Worker: `kanban clear <n> --field Worker`.
 
 ## Golden rules

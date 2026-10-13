@@ -41,6 +41,25 @@ def clear_field(number, field):
     _board().clear_field(number, field)
 
 
+def workflow():
+    """The board workflow (columns, roles and transitions); empty if unsupported."""
+    fn = getattr(_board(), "workflow", None)
+    return fn() if fn else {"columns": []}
+
+
+def advance(number, to=None):
+    fn = getattr(_board(), "advance", None)
+    if fn is None:
+        raise KanbanError("advance is not supported by this backend")
+    fn(number, to)
+
+
+def statuses_for_role(role, data=None):
+    """Columns whose stage role is `role`, in board order."""
+    workflow_data = data if data is not None else workflow()
+    return [c["id"] for c in workflow_data.get("columns", []) if c.get("role") == role]
+
+
 def sort_key(it):
     m = re.search(r"RFC-(\d+(?:-\d+)*)", it["title"] or "")
     if m:
@@ -203,6 +222,22 @@ def cmd_close(args):
     _board().close(args.number, args.comment, args.reason)
 
 
+def cmd_workflow(args):
+    data = workflow()
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False))
+        return
+    for column in data.get("columns", []):
+        role = column.get("role") or "-"
+        transitions = ",".join(column.get("transitions") or []) or "-"
+        final = " (final)" if column.get("final") else ""
+        print(f"{column['id']}\t{column['name']}{final}\trole={role}\ttransitions={transitions}")
+
+
+def cmd_advance(args):
+    advance(args.number, args.to)
+
+
 def cmd_create(args):
     body = ""
     if args.body_file:
@@ -263,6 +298,15 @@ def main():
     p.add_argument("--comment")
     p.add_argument("--reason", default="not planned")
     p.set_defaults(func=cmd_close)
+
+    p = sub.add_parser("workflow")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_workflow)
+
+    p = sub.add_parser("advance")
+    p.add_argument("number")
+    p.add_argument("--to")
+    p.set_defaults(func=cmd_advance)
 
     p = sub.add_parser("clear")
     p.add_argument("number")

@@ -24,8 +24,8 @@ user intervention. You do NOT write production code.
 
 ## Delivery
 
-When done, move to plan:
-`kanban set <n> --status plan --role framework-architect` and `kanban clear <n> --field Worker`.
+When done, advance along the workflow:
+`kanban advance <n>` and `kanban clear <n> --field Worker`.
 
 If there is an infrastructure/integration impediment that requires a human
 decision, block it: `kanban set <n> --blocked --blocked-by "decision: <reason>"`.
