@@ -36,7 +36,7 @@ If the item is blocked (`kanban list --blocked --json` or `kanban get <n>`):
    bump it (fix=patch, feat=minor, breaking=major) and `git tag vX.Y.Z && git push origin vX.Y.Z`
 4. Release: `gh release create vX.Y.Z --generate-notes`
 5. Update `docs/ROADMAP.md`, `docs/STATE.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md`.
-6. Move to testing: `kanban set <n> --status testing --role qa`.
+6. Advance: `kanban advance <n>` — the board moves it to the next stage and assigns its role.
 
 ### If rejected
 

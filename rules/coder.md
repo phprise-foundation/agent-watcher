@@ -27,8 +27,8 @@ architecture decisions and do NOT change the task's scope.
 5. `git push -u origin <branch>`
 6. `gh pr create --base main --title "..." --body "..."`
 
-Then register the PR in a comment and move to review:
-`kanban set <n> --status reviewing --role tech-lead` and `kanban clear <n> --field Worker`.
+Then register the PR in a comment and advance:
+`kanban advance <n>` and `kanban clear <n> --field Worker`.
 
 ## Impediment (does not change Status)
 

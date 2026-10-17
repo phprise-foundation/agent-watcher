@@ -63,6 +63,7 @@ docker run -d \
 |---|---|---|
 | `--name` | yes | agent identity (signs comments and the `Worker` field) |
 | `--rule` | yes | rule (predefined or path), **without** the `.md` extension. Repeatable. |
+| `--role` | no | workflow role owned by this agent (local backend). Defaults to the rule's `role`; the board maps stages to roles |
 | `--profile` | no | personality profile (predefined name or `.yaml` path). If omitted, uses the rule's default personality |
 | `--model` | yes | model in `provider/model` format |
 | `--fallback-model` | no | fallback model used **only in the current iteration** when the primary returns rate limit/quota (429). Without a fallback, the agent goes back to sleep and reprocesses on the next window |
@@ -94,6 +95,8 @@ The transport is chosen by `--backend` (env `AW_BACKEND`) and lives under
   board REST API, using the standard library only (`urllib`). Needs
   `AW_KANBAN_URL`/`AW_KANBAN_TOKEN` (`--kanban-url`/`--kanban-token`). The board
   password is used as the bearer token; items are addressed by their board `id`.
+  It additionally exposes the board-driven workflow (`workflow`, `advance` and
+  `agents`).
 
 Both expose the same primitives (`items`, `set_field`, `clear_field`, `comment`,
 `close`, `create`) and the same internal item shape, so the loop, the agent
@@ -138,6 +141,11 @@ personality: >          # agent personality (predefined by the role)
 # Tech Lead
 ... instructions ...
 ```
+
+> On the **local** backend the columns and their roles come from the board
+> workflow (`kanban workflow`); the frontmatter `statuses`/`role` are only a
+> fallback. The agent advances items with `kanban advance` instead of hardcoding
+> the next status.
 
 ### Predefined rules (in `/app/rules/`)
 
@@ -253,7 +261,27 @@ these fields (the self-hosted board exposes the same fields through its API):
 - `Blocked` (single-select, option `blocked`): boolean flag independent of status.
 - `BlockedBy` (text): when blocked, indicates which task/issue is blocking (e.g. `RFC-2`). Used by the Tech Lead to decide on unblocking.
 - `Role` (single-select): `product-owner | solutions-architect | systems-architect | framework-architect | tech-lead | qa | coder`.
-- `Worker` (**text**): name of the agent currently running. Must be text (not single-select) so the name is free — each person chooses the `--name` when starting the agent.
+- `Worker` (**text**): name of the agent currently running. Must be text (not single-select) so the name is free — each person chooses the `--name`   when starting the agent.
+
+## Board-driven workflow and runner (local backend)
+
+On the self-hosted board the workflow is data: each column owns a `role` and its
+allowed `transitions`, so the agent no longer hardcodes statuses.
+
+- `kanban workflow` prints the columns (id, name, owning role, allowed next).
+- The loop derives the columns it polls from its `--role`
+  (`column.role == role`), so a stage is consumed by whoever owns it.
+- When done, the agent calls `kanban advance <n>` (optionally `--to <column>`);
+  the board moves the item and assigns the destination stage's role.
+
+`agent-runner` materializes the registry: every `AW_RUNNER_POLL` seconds it reads
+`GET /api/agents` and keeps exactly one `agent-watcher` subprocess per active
+agent, restarting on spec change and stopping removed ones.
+
+```bash
+export AW_KANBAN_URL=http://board AW_KANBAN_TOKEN=... AW_RUNNER_POLL=30
+agent-runner
+```
 
 ## Chat service
 

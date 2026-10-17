@@ -13,8 +13,9 @@ COPY profiles/ /app/profiles/
 COPY bin/agent-watcher /usr/local/bin/agent-watcher
 COPY bin/kanban /usr/local/bin/kanban
 COPY bin/chat-server /usr/local/bin/chat-server
+COPY bin/agent-runner /usr/local/bin/agent-runner
 
-RUN chmod +x /usr/local/bin/agent-watcher /usr/local/bin/kanban /usr/local/bin/chat-server
+RUN chmod +x /usr/local/bin/agent-watcher /usr/local/bin/kanban /usr/local/bin/chat-server /usr/local/bin/agent-runner
 
 ENV PYTHONPATH=/app
 ENV AW_RULES_DIR=/app/rules

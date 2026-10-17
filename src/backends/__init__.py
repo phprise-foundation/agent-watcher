@@ -13,6 +13,12 @@ Every backend exposes the same primitives:
     comment(number, body)
     close(number, comment, reason)
     create(title, body, status, role, blocked_by) -> number
+
+The `local` backend additionally exposes the board-driven workflow:
+
+    workflow()                     # columns with their role and transitions
+    advance(number, to=None)       # move along a configured transition
+    agents()                       # agent registry (used by the runner)
 """
 import os
 

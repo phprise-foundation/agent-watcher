@@ -27,8 +27,8 @@ implementation (that belongs to the other architects).
 
 ## Delivery
 
-When done, move the RFC to design:
-`kanban set <n> --status design --role systems-architect` and `kanban clear <n> --field Worker`.
+When done, advance the RFC along the workflow:
+`kanban advance <n>` and `kanban clear <n> --field Worker`.
 
 If the demand is infeasible or needs a human decision, do NOT advance: comment the
 verdict and block it with `kanban set <n> --blocked --blocked-by "human decision"`.

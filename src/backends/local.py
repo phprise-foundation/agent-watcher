@@ -136,5 +136,50 @@ def create(title, body, status, role, blocked_by):
     return number
 
 
+def workflow():
+    """Board workflow: columns with their role and allowed transitions."""
+    board = _request("GET", "/api/board").get("board", {})
+    return {
+        "name": board.get("name") or "",
+        "columns": [_workflow_column(raw) for raw in (board.get("columns") or [])],
+    }
+
+
+def advance(number, to=None):
+    payload = {} if to is None else {"to": to}
+    _request("POST", f"{_item_path(number)}/advance", payload)
+
+
+def agents():
+    """Agent registry entries (the runner materializes the active ones)."""
+    rows = _request("GET", "/api/agents").get("agents", [])
+    return [_agent_row(raw) for raw in rows]
+
+
+def _workflow_column(raw):
+    return {
+        "id": raw.get("id") or "",
+        "name": raw.get("name") or "",
+        "position": raw.get("position", 0),
+        "final": bool(raw.get("final")),
+        "role": raw.get("role") or "",
+        "transitions": [str(t) for t in (raw.get("transitions") or [])],
+    }
+
+
+def _agent_row(raw):
+    return {
+        "id": raw.get("id") or "",
+        "name": raw.get("name") or "",
+        "active": bool(raw.get("active")),
+        "rule": raw.get("rule") or "",
+        "profile": raw.get("profile") or "",
+        "model": raw.get("model") or "",
+        "fallback_model": raw.get("fallback_model") or "",
+        "interval": int(raw.get("interval") or 300),
+        "workspace": raw.get("workspace") or "/workspace",
+    }
+
+
 def _item_path(number):
     return f"/api/items/{int(number)}"
