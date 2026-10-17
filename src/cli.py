@@ -68,6 +68,8 @@ def main(argv=None):
                     help="seconds between scans when the queue is empty (default 300)")
     ap.add_argument("--short-interval", type=int, default=30,
                     help="seconds between tasks after a run (default 30)")
+    ap.add_argument("--runs-file", default=os.environ.get("AW_RUNS_FILE"),
+                    help="runs ledger path (JSON lines; default <workdir>/.agent-watcher/runs.jsonl)")
     args = ap.parse_args(argv)
 
     parse_env(args.env)
@@ -110,6 +112,7 @@ def main(argv=None):
         "profile_personality": profile_personality,
         "interval": args.interval,
         "short_interval": args.short_interval,
+        "runs_file": args.runs_file,
     }
 
     watcher.run(config)

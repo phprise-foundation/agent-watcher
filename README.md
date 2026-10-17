@@ -76,6 +76,7 @@ docker run -d \
 | `--env` | no | `KEY=VALUE` exported to the process. Repeatable (alternative to `-e`) |
 | `--interval` | no | seconds between scans when the queue is empty (default `300`) |
 | `--short-interval` | no | seconds between tasks after a run (default `30`) |
+| `--runs-file` | no | runs ledger path (JSON lines; default `<workdir>/.agent-watcher/runs.jsonl`) |
 | `--rules-dir` | no | predefined rules directory (default `/app/rules`) |
 | `--profiles-dir` | no | predefined profiles directory (default `/app/profiles`) |
 
@@ -299,6 +300,24 @@ chat-server            # listens on :8080 (override with AW_CHAT_PORT)
 - `POST /reply` (bearer `AW_CHAT_TOKEN`) with `{"messages":[{"role","body"}]}` → `{"reply":"..."}`
 
 The service reads the board through the `kanban` helper and never mutates it.
+
+## Runs ledger
+
+Every opencode invocation is recorded as one JSON line in the runs ledger
+(`--runs-file`, default `<workdir>/.agent-watcher/runs.jsonl`). Each row carries
+the run id, the opencode session id, the agent, role, item, the model actually
+used (and whether it was the fallback), the outcome, timing and error.
+
+```json
+{"run_id": "...", "session_id": "ses_...", "agent": "Davi", "role": "tech-lead",
+ "issue_id": 42, "from_column": "reviewing", "model_configured": "...",
+ "model_used": "...", "fallback_used": false, "outcome": "ok", "error": "",
+ "started_at": 1.75e9, "ended_at": 1.75e9, "duration_s": 12.3, "workdir": "/workspace"}
+```
+
+Tokens and cost are **not** in the row: they live in opencode's own `session`
+table and are joined later on `session_id` (this is what the multi-agent board's
+model-performance metrics read).
 
 ## Building the image
 
