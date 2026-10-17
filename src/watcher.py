@@ -1,12 +1,13 @@
 """agent-watcher loop: scans the board, claims tasks and invokes opencode."""
 import datetime
+import json
 import subprocess
 import sys
-import tempfile
 import time
 
 import kanban
 import rules
+import runs
 
 STATUSES_HELP = ("intent, feasibility, design, plan, qa-refinement, "
                  "coding, reviewing, testing, done")
@@ -130,39 +131,95 @@ def build_prompt(config, number=None, title=None, mention=None):
 """
 
 
+def _parse_run_stdout(stdout):
+    session_id = None
+    text = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if session_id is None:
+            session_id = event.get("sessionID")
+        if event.get("type") == "text":
+            chunk = (event.get("part") or {}).get("text")
+            if chunk:
+                text.append(chunk)
+    return session_id, "\n".join(text)
+
+
 def run_agent(config, model, prompt, number=None):
     tag = f" for #{number}" if number is not None else ""
     log(f"invoking opencode{tag} ({model})")
-    with tempfile.TemporaryFile() as errf:
+    started_at = time.time()
+    try:
         r = subprocess.run(
-            ["opencode", "run", "--auto", "--print-logs", "-m", model,
-             "--dir", config["workdir"], prompt],
-            stdout=None, stderr=errf,
+            ["opencode", "run", "--format", "json", "--auto", "--print-logs",
+             "-m", model, "--dir", config["workdir"], prompt],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        errf.seek(0)
-        err_text = errf.read().decode("utf-8", "replace")
+    except FileNotFoundError:
+        return runs.RunRecord(
+            session_id=None, outcome="error", error="opencode not found",
+            started_at=started_at, ended_at=time.time(),
+        )
+    ended_at = time.time()
+    err_text = (r.stderr or b"").decode("utf-8", "replace")
     if err_text:
         sys.stderr.write(err_text)
+    session_id, text = _parse_run_stdout((r.stdout or b"").decode("utf-8", "replace"))
+    if text:
+        print(text, flush=True)
     if r.returncode == 0:
-        return "ok"
-    log(f"opencode exited with code {r.returncode}")
-    if _llm_rate_limited(err_text):
-        return "rate_limited"
-    return "error"
+        outcome, error = "ok", ""
+    else:
+        log(f"opencode exited with code {r.returncode}")
+        outcome = "rate_limited" if _llm_rate_limited(err_text) else "error"
+        error = err_text.strip()
+    return runs.RunRecord(
+        session_id=session_id, outcome=outcome, error=error,
+        started_at=started_at, ended_at=ended_at,
+    )
 
 
-def process(config, name, number, title=None, mention=None):
-    """Claims the item, runs opencode (with fallback) and releases the Worker."""
+def process(config, name, number, title=None, mention=None, status=None):
+    """Claims the item, runs opencode (with fallback), records a run, releases."""
     kanban.set_field(number, "Worker", name)
     prompt = build_prompt(config, number=number, title=title, mention=mention)
-    result = run_agent(config, config["model"], prompt, number)
-    if result == "rate_limited":
+    record = run_agent(config, config["model"], prompt, number)
+    fallback_used = False
+    if record.outcome == "rate_limited":
         fallback = config.get("fallback_model")
         if fallback:
             log(f"rate limit on primary model; trying fallback {fallback} on #{number}")
-            result = run_agent(config, fallback, prompt, number)
+            fallback_used = True
+            record = run_agent(config, fallback, prompt, number)
     kanban.clear_field(number, "Worker")
-    return result
+    record_run(config, record, number, status, fallback_used)
+    return record.outcome
+
+
+def record_run(config, record, number, status, fallback_used):
+    runs.append_run(runs.runs_file(config), {
+        "run_id": runs.new_run_id(),
+        "session_id": record.session_id,
+        "agent": config["name"],
+        "role": config.get("role"),
+        "issue_id": number,
+        "from_column": status,
+        "model_configured": config["model"],
+        "model_used": config["fallback_model"] if fallback_used else config["model"],
+        "fallback_used": fallback_used,
+        "outcome": record.outcome,
+        "error": record.error,
+        "started_at": record.started_at,
+        "ended_at": record.ended_at,
+        "duration_s": record.duration_s,
+        "workdir": config["workdir"],
+    })
 
 
 def next_task(rows, statuses):
@@ -234,7 +291,8 @@ def loop(config):
                 mention = kanban.next_mention(name)
                 if mention:
                     log(f"answering mention @{name} on #{mention['number']} ({mention['status']})")
-                    result = process(config, name, mention["number"], mention=mention)
+                    result = process(config, name, mention["number"], mention=mention,
+                                     status=mention.get("status"))
                     backoff = _after(result, backoff, short, max_backoff)
                     continue
 
@@ -242,7 +300,8 @@ def loop(config):
                 blk = next_blocked(rows)
                 if blk:
                     log(f"unblocking #{blk['number']} (status={blk['status']})")
-                    result = process(config, name, blk["number"], blk["title"])
+                    result = process(config, name, blk["number"], blk["title"],
+                                     status=blk.get("status"))
                     backoff = _after(result, backoff, short, max_backoff)
                     continue
 
@@ -257,7 +316,8 @@ def loop(config):
                 continue
 
             log(f"claiming #{task['number']} ({task['status']})")
-            result = process(config, name, task["number"], task["title"])
+            result = process(config, name, task["number"], task["title"],
+                             status=task.get("status"))
             backoff = _after(result, backoff, short, max_backoff)
 
         except kanban.RateLimitError as e:
