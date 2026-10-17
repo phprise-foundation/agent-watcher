@@ -35,7 +35,7 @@ class PromptTest(unittest.TestCase):
             "name": "Davi",
             "backend": "local",
             "workflow": WORKFLOW,
-            "rules": [],
+            "roles": [],
             "profile_personality": "",
         }
         config.update(overrides)

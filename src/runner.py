@@ -29,7 +29,7 @@ def log(message):
 
 def spec_of(agent):
     return (
-        agent["name"], agent["rule"], agent["profile"], agent["model"],
+        agent["name"], agent["profile"], agent["model"],
         agent["fallback_model"], agent["interval"], agent["workspace"],
     )
 
@@ -40,7 +40,6 @@ def command_for(agent):
         sys.executable, cli,
         "--name", agent["name"],
         "--role", agent["id"],
-        "--rule", agent["rule"] or agent["id"],
         "--model", agent["model"],
         "--backend", "local",
         "--kanban-url", os.environ.get("AW_KANBAN_URL", ""),

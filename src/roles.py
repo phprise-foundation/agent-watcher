@@ -1,19 +1,18 @@
-"""Loading of rules (--rule) with YAML frontmatter.
+"""Loading of roles (--role) with YAML frontmatter.
 
-Each rule is a markdown file:
+Each role is a markdown file:
 
     ---
-    statuses: [reviewing]   # board columns this rule consumes (order = priority)
-    role: tech-lead         # value of the Role field this agent represents
+    statuses: [reviewing]   # board columns this role consumes (order = priority)
     unblock: true           # optional: this agent also handles blocked items
     interactive: true       # optional: acts on new user comments instead of reprocessing
     ---
     # Tech Lead
     ... instructions ...
 
-The reference passed in `--rule` can be:
-  - a predefined name (e.g. "tech-lead" -> <rules_dir>/tech-lead.md)
-  - a path mounted in the container (e.g. "/rules/my-role.md")
+The reference passed in `--role` can be:
+  - a predefined name (e.g. "tech-lead" -> <roles_dir>/tech-lead.md)
+  - a path mounted in the container (e.g. "/roles/my-role.md")
 """
 import dataclasses
 import os
@@ -22,14 +21,13 @@ import re
 
 import yaml
 
-RULES_DIR = pathlib.Path(os.environ.get("AW_RULES_DIR", "/app/rules"))
+ROLES_DIR = pathlib.Path(os.environ.get("AW_ROLES_DIR", "/app/roles"))
 
 
 @dataclasses.dataclass
-class Rule:
+class Role:
     name: str
     statuses: list
-    role: str
     unblock: bool
     interactive: bool
     personality: str
@@ -41,12 +39,12 @@ def _resolve(ref: str) -> pathlib.Path:
     if p.exists():
         return p
     if ref.endswith(".md"):
-        cand = RULES_DIR / ref
+        cand = ROLES_DIR / ref
     else:
-        cand = RULES_DIR / f"{ref}.md"
+        cand = ROLES_DIR / f"{ref}.md"
     if cand.exists():
         return cand
-    raise FileNotFoundError(f"rule not found: {ref}")
+    raise FileNotFoundError(f"role not found: {ref}")
 
 
 def _parse(text: str):
@@ -60,7 +58,7 @@ def _parse(text: str):
     return meta, m.group(2).strip()
 
 
-def load_rule(ref: str) -> Rule:
+def load_role(ref: str) -> Role:
     path = _resolve(ref)
     text = path.read_text()
     meta, body = _parse(text)
@@ -68,10 +66,9 @@ def load_rule(ref: str) -> Rule:
     if isinstance(statuses, str):
         statuses = [s.strip() for s in statuses.split(",") if s.strip()]
     statuses = [str(s) for s in statuses]
-    return Rule(
+    return Role(
         name=path.stem,
         statuses=statuses,
-        role=meta.get("role") or "",
         unblock=bool(meta.get("unblock", False)),
         interactive=bool(meta.get("interactive", False)),
         personality=meta.get("personality") or "",
@@ -79,14 +76,14 @@ def load_rule(ref: str) -> Rule:
     )
 
 
-def load_rules(refs: list) -> list:
-    return [load_rule(r) for r in refs]
+def load_roles(refs: list) -> list:
+    return [load_role(r) for r in refs]
 
 
-def combined_statuses(rules: list) -> list:
-    """Ordered union of the statuses of all rules (preserves order)."""
+def combined_statuses(roles: list) -> list:
+    """Ordered union of the statuses of all roles (preserves order)."""
     seen = []
-    for r in rules:
+    for r in roles:
         for s in r.statuses:
             if s not in seen:
                 seen.append(s)

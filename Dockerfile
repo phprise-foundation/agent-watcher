@@ -8,7 +8,7 @@ RUN apk add --no-cache bash git python3 py3-yaml github-cli
 WORKDIR /app
 
 COPY src/ /app/src/
-COPY rules/ /app/rules/
+COPY roles/ /app/roles/
 COPY profiles/ /app/profiles/
 COPY bin/agent-watcher /usr/local/bin/agent-watcher
 COPY bin/kanban /usr/local/bin/kanban
@@ -18,7 +18,7 @@ COPY bin/agent-runner /usr/local/bin/agent-runner
 RUN chmod +x /usr/local/bin/agent-watcher /usr/local/bin/kanban /usr/local/bin/chat-server /usr/local/bin/agent-runner
 
 ENV PYTHONPATH=/app
-ENV AW_RULES_DIR=/app/rules
+ENV AW_ROLES_DIR=/app/roles
 ENV AW_PROFILES_DIR=/app/profiles
 
 ENTRYPOINT ["agent-watcher"]

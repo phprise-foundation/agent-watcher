@@ -6,7 +6,7 @@ import sys
 import time
 
 import kanban
-import rules
+import roles
 import runs
 
 STATUSES_HELP = ("intent, feasibility, design, plan, qa-refinement, "
@@ -80,12 +80,12 @@ def board_help(config):
 
 def build_prompt(config, number=None, title=None, mention=None):
     name = config["name"]
-    rule_bodies = "\n\n".join(r.body for r in config["rules"])
+    role_bodies = "\n\n".join(r.body for r in config["roles"])
     profile = config.get("profile_personality")
     if profile:
         personalities = profile
     else:
-        personalities = "\n\n".join(r.personality for r in config["rules"] if r.personality)
+        personalities = "\n\n".join(r.personality for r in config["roles"] if r.personality)
 
     if mention:
         task_section = (
@@ -109,9 +109,9 @@ def build_prompt(config, number=None, title=None, mention=None):
 
 {personalities or "(not defined)"}
 
-# Your role's rules
+# Your role
 
-{rule_bodies}
+{role_bodies}
 
 # Communication (via issue comments)
 
@@ -255,7 +255,7 @@ def _after(result, backoff, short, max_backoff):
 
 def loop(config):
     name = config["name"]
-    statuses = rules.combined_statuses(config["rules"])
+    statuses = roles.combined_statuses(config["roles"])
     role = config.get("role")
     if config.get("backend") == "local":
         try:
@@ -267,8 +267,8 @@ def loop(config):
             derived = kanban.statuses_for_role(role, workflow) if role else []
             if derived:
                 statuses = derived
-    unblock = any(r.unblock for r in config["rules"])
-    interactive = any(r.interactive for r in config["rules"])
+    unblock = any(r.unblock for r in config["roles"])
+    interactive = any(r.interactive for r in config["roles"])
     interval = config["interval"]
     short = config.get("short_interval", 30)
     max_backoff = config.get("max_backoff", 3600)

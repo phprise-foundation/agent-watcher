@@ -16,7 +16,7 @@ Each container is **one agent** (one role). It:
 1. Scans the board looking for issues in the status(es) of its role (no `Worker` and no `Blocked`).
 2. Checks pending mentions (`@Name` in the comments) and replies.
 3. Claims the issue (`Worker` = agent name).
-4. Invokes opencode with the role's rules + the issue.
+4. Invokes opencode with the role's instructions + the issue.
 5. opencode itself does the work (code, tests, PR, review…) and updates the board.
 6. Releases the `Worker` and repeats.
 
@@ -32,7 +32,7 @@ docker run -d \
   -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   esdrasschonevald/agent-watcher \
   --name Davi \
-  --rule tech-lead \
+  --role tech-lead \
   --profile socratic \
   --model deepseek/deepseek-v4-pro \
   --fallback-model deepseek/deepseek-v4-flash \
@@ -50,7 +50,7 @@ docker run -d \
   -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   esdrasschonevald/agent-watcher \
   --name Davi \
-  --rule coder \
+  --role coder \
   --backend local \
   --kanban-url http://board \
   --kanban-token "$BOARD_PASSWORD" \
@@ -62,9 +62,8 @@ docker run -d \
 | Flag | Req. | Description |
 |---|---|---|
 | `--name` | yes | agent identity (signs comments and the `Worker` field) |
-| `--rule` | yes | rule (predefined or path), **without** the `.md` extension. Repeatable. |
-| `--role` | no | workflow role owned by this agent (local backend). Defaults to the rule's `role`; the board maps stages to roles |
-| `--profile` | no | personality profile (predefined name or `.yaml` path). If omitted, uses the rule's default personality |
+| `--role` | yes | role (predefined name or path), **without** the `.md` extension. Repeatable. |
+| `--profile` | no | personality profile (predefined name or `.yaml` path). If omitted, uses the role's default personality |
 | `--model` | yes | model in `provider/model` format |
 | `--fallback-model` | no | fallback model used **only in the current iteration** when the primary returns rate limit/quota (429). Without a fallback, the agent goes back to sleep and reprocesses on the next window |
 | `--backend` | no | board backend: `github` (default) or `local` |
@@ -77,7 +76,7 @@ docker run -d \
 | `--interval` | no | seconds between scans when the queue is empty (default `300`) |
 | `--short-interval` | no | seconds between tasks after a run (default `30`) |
 | `--runs-file` | no | runs ledger path (JSON lines; default `<workdir>/.agent-watcher/runs.jsonl`) |
-| `--rules-dir` | no | predefined rules directory (default `/app/rules`) |
+| `--roles-dir` | no | predefined roles directory (default `/app/roles`) |
 | `--profiles-dir` | no | predefined profiles directory (default `/app/profiles`) |
 
 > `GH_TOKEN` is required by the `github` backend (`gh` reads it from
@@ -125,15 +124,14 @@ On GitHub rate limit/failure, the agent falls back to the **stale cache** and
 keeps operating without new requests. **Add the file to the `.gitignore` of the
 mounted repository** so the reviewer agent doesn't accidentally commit it.
 
-## Rules
+## Roles
 
-Rules define **what the agent does** and are composable. Each `--rule` is a
-markdown with frontmatter:
+A **role** defines what the agent does and which stages it owns. Each `--role`
+is a markdown with frontmatter:
 
 ```markdown
 ---
-statuses: [reviewing]   # board columns this rule consumes (order = priority)
-role: tech-lead         # value of the Role field
+statuses: [reviewing]   # board columns this role consumes (order = priority)
 unblock: true           # optional: this agent also handles blocked items
 interactive: true       # optional: acts on new user comments instead of reprocessing
 personality: >          # agent personality (predefined by the role)
@@ -144,34 +142,34 @@ personality: >          # agent personality (predefined by the role)
 ```
 
 > On the **local** backend the columns and their roles come from the board
-> workflow (`kanban workflow`); the frontmatter `statuses`/`role` are only a
-> fallback. The agent advances items with `kanban advance` instead of hardcoding
-> the next status.
+> workflow (`kanban workflow`); the frontmatter `statuses` is only a fallback.
+> The agent advances items with `kanban advance` instead of hardcoding the next
+> status.
 
-### Predefined rules (in `/app/rules/`)
+### Predefined roles (in `/app/roles/`)
 
-| Rule | `statuses` | `role` | `unblock` |
-|---|---|---|---|
-| `product-owner` | `intent` | `product-owner` | — |
-| `solutions-architect` | `feasibility` | `solutions-architect` | — |
-| `systems-architect` | `design` | `systems-architect` | — |
-| `framework-architect` | `plan` | `framework-architect` | — |
-| `tech-lead` | `reviewing` | `tech-lead` | yes |
-| `quality-assurance` | `qa-refinement`, `testing` | `qa` | — |
-| `coder` | `coding` | `coder` | — |
+| Role | `statuses` | `unblock` |
+|---|---|---|
+| `product-owner` | `intent` | — |
+| `solutions-architect` | `feasibility` | — |
+| `systems-architect` | `design` | — |
+| `framework-architect` | `plan` | — |
+| `tech-lead` | `reviewing` | yes |
+| `qa` | `qa-refinement`, `testing` | — |
+| `coder` | `coding` | — |
 
-To use a custom rule, mount the file and pass the path (with or without `.md`):
+To use a custom role, mount the file and pass the path (with or without `.md`):
 
 ```bash
-docker run -d ... -v "$(pwd)/rules:/rules" ... \
-  --rule my-role
+docker run -d ... -v "$(pwd)/roles:/roles" ... \
+  --role my-role
 ```
 
 ## Personality profiles (in `/app/profiles/`)
 
 Profiles are YAML files describing the AI's behavior/style. When `--profile` is
-provided, it replaces the rule's default `personality`. Without `--profile`, the
-agent uses the `personality` defined in each rule's frontmatter.
+provided, it replaces the role's default `personality`. Without `--profile`, the
+agent uses the `personality` defined in each role's frontmatter.
 
 | Profile | Core idea |
 |---|---|
@@ -242,7 +240,7 @@ editing/unmarking the comment.
 
 For roles that **stay in the same status** during a conversation (e.g. the
 Product Owner in `intent`, talking to the client before creating the RFC), use
-`interactive: true` in the rule's frontmatter. In this mode the agent only
+`interactive: true` in the role's frontmatter. In this mode the agent only
 processes an item when there is new user activity (an item with no comments, or
 whose last comment is not signed by it), avoiding reprocessing the same issue
 every cycle.
@@ -337,7 +335,7 @@ docker push esdrasschonevald/agent-watcher:latest
 ```bash
 pip install pyyaml        # (or apk add py3-yaml)
 export GH_TOKEN=... AW_OWNER=... AW_REPO=... AW_PROJECT=...
-python3 src/cli.py --name Davi --rule tech-lead \
+python3 src/cli.py --name Davi --role tech-lead \
   --model deepseek/deepseek-v4-pro --fallback-model deepseek/deepseek-v4-flash \
   --repo OWNER/REPO --project 1 --workdir .
 ```
@@ -346,7 +344,7 @@ Against a self-hosted board:
 
 ```bash
 export AW_BACKEND=local AW_KANBAN_URL=http://localhost:8080 AW_KANBAN_TOKEN=...
-python3 src/cli.py --name Davi --rule coder \
+python3 src/cli.py --name Davi --role coder \
   --model deepseek/deepseek-v4-pro \
   --backend local --kanban-url "$AW_KANBAN_URL" --kanban-token "$AW_KANBAN_TOKEN" \
   --workdir .

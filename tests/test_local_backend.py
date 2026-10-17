@@ -181,7 +181,7 @@ class LocalBackendTest(unittest.TestCase):
 
     def test_agents_maps_spec(self):
         self.respond({"agents": [{
-            "id": "coder", "name": "Coder", "active": True, "rule": "coder",
+            "id": "coder", "name": "Coder", "active": True,
             "profile": "skeptic", "model": "deepseek/deepseek-flash",
             "fallback_model": "", "interval": 120, "workspace": "/workspace",
         }]})

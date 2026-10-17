@@ -29,7 +29,7 @@ class FakeProcess:
 
 def agent(**overrides):
     data = {
-        "id": "coder", "name": "Coder", "active": True, "rule": "coder",
+        "id": "coder", "name": "Coder", "active": True,
         "profile": "", "model": "m", "fallback_model": "", "interval": 300,
         "workspace": "/workspace",
     }

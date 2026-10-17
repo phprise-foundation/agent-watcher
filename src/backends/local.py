@@ -172,7 +172,6 @@ def _agent_row(raw):
         "id": raw.get("id") or "",
         "name": raw.get("name") or "",
         "active": bool(raw.get("active")),
-        "rule": raw.get("rule") or "",
         "profile": raw.get("profile") or "",
         "model": raw.get("model") or "",
         "fallback_model": raw.get("fallback_model") or "",

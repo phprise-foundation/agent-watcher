@@ -139,7 +139,7 @@ class ProcessTest(unittest.TestCase):
             "model": "m/1",
             "fallback_model": "m/2",
             "workdir": "/ws",
-            "rules": [],
+            "roles": [],
         }
 
     @staticmethod

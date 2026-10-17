@@ -4,7 +4,7 @@ import os
 import sys
 
 import profiles
-import rules
+import roles
 import watcher
 
 
@@ -41,10 +41,10 @@ def main(argv=None):
         description="Autonomous agent that operates a Kanban board (GitHub Project V2 or a self-hosted board).",
     )
     ap.add_argument("--name", required=True, help="agent identity (signs comments/Worker)")
-    ap.add_argument("--rule", action="append", required=True,
-                    help="rule (predefined or path). Repeatable.")
-    ap.add_argument("--role", default=None,
-                    help="workflow role owned by this agent (local backend; defaults to the rule's role)")
+    ap.add_argument("--role", action="append", dest="roles", default=[],
+                    help="role (predefined name or path). Repeatable.")
+    ap.add_argument("--rule", action="append", dest="roles", default=[],
+                    help=argparse.SUPPRESS)
     ap.add_argument("--model", required=True, help="model in provider/model format")
     ap.add_argument("--fallback-model", default=None,
                     help="fallback model (provider/model) used only in the current iteration on rate limit (429/quota)")
@@ -58,10 +58,10 @@ def main(argv=None):
                     help="board bearer token (local backend)")
     ap.add_argument("--workdir", required=True, help="working directory (mounted)")
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE. Repeatable.")
-    ap.add_argument("--rules-dir", default=os.environ.get("AW_RULES_DIR", "/app/rules"),
-                    help="predefined rules directory (default: /app/rules)")
+    ap.add_argument("--roles-dir", default=os.environ.get("AW_ROLES_DIR", "/app/roles"),
+                    help="predefined roles directory (default: /app/roles)")
     ap.add_argument("--profile", default=None,
-                    help="personality profile (predefined name or .yaml path). If omitted, uses the rule's default personality")
+                    help="personality profile (predefined name or .yaml path). If omitted, uses the role's default personality")
     ap.add_argument("--profiles-dir", default=os.environ.get("AW_PROFILES_DIR", "/app/profiles"),
                     help="predefined profiles directory (default: /app/profiles)")
     ap.add_argument("--interval", type=int, default=300,
@@ -76,7 +76,7 @@ def main(argv=None):
 
     os.environ["AW_BACKEND"] = args.backend
     os.environ["AW_AGENT_NAME"] = args.name
-    os.environ["AW_RULES_DIR"] = args.rules_dir
+    os.environ["AW_ROLES_DIR"] = args.roles_dir
     os.environ["AW_PROFILES_DIR"] = args.profiles_dir
     os.environ["AW_WORKDIR"] = args.workdir
 
@@ -88,11 +88,14 @@ def main(argv=None):
     if not os.path.isdir(args.workdir):
         raise SystemExit(f"--workdir does not exist: {args.workdir}")
 
-    loaded = rules.load_rules(args.rule)
-    if not loaded:
-        raise SystemExit("no rule loaded")
+    if not args.roles:
+        raise SystemExit("--role is required")
 
-    role = args.role or next((r.role for r in loaded if r.role), "")
+    loaded = roles.load_roles(args.roles)
+    if not loaded:
+        raise SystemExit("no role loaded")
+
+    role = loaded[0].name
 
     profile_personality = None
     if args.profile:
@@ -108,7 +111,7 @@ def main(argv=None):
         "project": str(args.project) if args.project else "",
         "kanban_url": args.kanban_url,
         "workdir": args.workdir,
-        "rules": loaded,
+        "roles": loaded,
         "profile_personality": profile_personality,
         "interval": args.interval,
         "short_interval": args.short_interval,
