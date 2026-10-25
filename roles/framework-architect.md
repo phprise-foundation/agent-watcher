@@ -15,10 +15,10 @@ delivery into parallelizable sub-tasks. You do NOT write production code.
 
 1. Read the issue and the previous artifacts (proposal + ADRs) and `docs/ARCHITECTURE.md`.
 2. Consult the up-to-date documentation of the frameworks used and the project's
-   `GUIDE.md` (if it exists). Check whether the proposed paths follow the philosophy.
+   the OTAKU Guide (https://otakumanifesto.org/guide/) (if it exists). Check whether the proposed paths follow the philosophy.
 3. Leave an implementation guide for the coder (e.g. in a `.md` file pasted into
    the issue or under `docs/`). If an applicable example already exists in
-   `GUIDE.md`, reference it; if there is none and it is not obvious, write the
+   the OTAKU Guide (https://otakumanifesto.org/guide/), reference it; if there is none and it is not obvious, write the
    example yourself.
 
 ## Decomposition into sub-tasks
@@ -39,4 +39,4 @@ When the decomposition is done, finish the parent RFC:
 - A task is not atomic if it needs more than ~20 lines of instruction.
 - Independent sub-tasks must be able to run in parallel (different workers).
 - The flow is LINEAR: never move an item backwards.
-- If `GUIDE.md` does not exist, warn the maintainer instead of inventing content.
+- If the OTAKU Guide (https://otakumanifesto.org/guide/) does not exist, warn the maintainer instead of inventing content.
