@@ -1,5 +1,9 @@
 # agent-watcher
 
+> [!WARNING]
+> **Deprecated — no longer maintained.** This repository will be archived.
+> Its replacement is [`esdras-schonevald/open-warden`](https://github.com/esdras-schonevald/open-warden).
+
 Autonomous agent that operates a **Kanban board** inside a Docker container,
 using [opencode](https://opencode.ai) as the AI runtime. The board can be a
 **GitHub Project V2** or a **self-hosted [multi-agent](https://github.com/phprise-foundation/multi-agent)
